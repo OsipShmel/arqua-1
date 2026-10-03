@@ -114,10 +114,11 @@ def _operations(paths: dict[str, Any]) -> Iterable[ContractOperation]:
             if not isinstance(op, dict):
                 continue
             responses = op.get("responses")
+            codes = tuple(str(c) for c in responses) if isinstance(responses, dict) else ()
             yield ContractOperation(
                 ref=OperationRef(method=method, path=path, operation_id=op.get("operationId")),
                 tags=tuple(str(t) for t in op.get("tags", [])),
-                status_codes=tuple(str(c) for c in responses) if isinstance(responses, dict) else (),
+                status_codes=codes,
             )
 
 

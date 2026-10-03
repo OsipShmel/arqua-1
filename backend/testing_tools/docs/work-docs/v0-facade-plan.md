@@ -85,4 +85,15 @@ backend/testing_tools/
 - [x] 4. Создание и статус прогона
 - [x] 5. Движок
 - [x] 6. result / cancel / artifacts
-- [ ] 7. Запуск
+- [x] 7. Запуск
+
+## Итог
+
+- 58 тестов, `mypy --strict` чистый; ручной smoke через uvicorn + curl пройден.
+- Отступления от `API.md`:
+  - неизвестный маршрут / метод отдают стандартный ответ FastAPI, а не ProblemDetail —
+    подходящего `ErrorCode` в контракте нет;
+  - невалидный `path_regex` в `OperationFilter` → `422 validation_error` (в доке не описано);
+  - прогоны и idempotency-ключи живут в памяти процесса, без 24-часового TTL;
+  - `timed_out` для инструмента: прерванный инструмент → `error` с `code=timeout`,
+    не начатые → `skipped`.

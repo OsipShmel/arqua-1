@@ -41,7 +41,10 @@ def problem_response(
         errors=errors or [],
     )
     return JSONResponse(
-        problem.model_dump(mode="json"), status_code=status, headers=headers, media_type=PROBLEM_JSON
+        problem.model_dump(mode="json"),
+        status_code=status,
+        headers=headers,
+        media_type=PROBLEM_JSON,
     )
 
 
