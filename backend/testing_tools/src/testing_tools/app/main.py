@@ -1,15 +1,31 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+import httpx2
 from fastapi import FastAPI
 
 from testing_tools.api.schemas import HealthResponse, HealthState, ToolName
 from testing_tools.app.errors import install_error_handlers
 from testing_tools.app.routes import router
 from testing_tools.app.settings import Settings
+from testing_tools.app.store import RunStore
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None, transport: httpx2.AsyncBaseTransport | None = None
+) -> FastAPI:
+    """`transport` replaces the network for contract downloads (tests)."""
     settings = settings or Settings.from_env()
-    app = FastAPI(title="testing_tools", version=settings.version)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        async with httpx2.AsyncClient(transport=transport) as http:
+            app.state.http = http
+            yield
+
+    app = FastAPI(title="testing_tools", version=settings.version, lifespan=lifespan)
     app.state.settings = settings
+    app.state.store = RunStore()
     install_error_handlers(app)
     app.include_router(router, prefix=settings.api_prefix)
 

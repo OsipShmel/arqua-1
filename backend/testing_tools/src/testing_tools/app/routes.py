@@ -1,17 +1,31 @@
+import math
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+import httpx2
+from fastapi import APIRouter, Depends, Header, Request, Response
 from pydantic import BaseModel
 
 from testing_tools.api.schemas import (
+    ErrorCode,
     MicrocksConfig,
     MutationConfig,
     ProblemDetail,
+    RunCreated,
+    RunCreateRequest,
+    RunStatus,
     SchemathesisConfig,
     ToolInfo,
     ToolName,
 )
+from testing_tools.app.contract import load_contract
+from testing_tools.app.errors import ApiError
 from testing_tools.app.settings import Settings
+from testing_tools.app.store import RunRecord, RunStore
+from testing_tools.app.validation import (
+    check_path_regexes,
+    check_test_suites,
+    check_tools_available,
+)
 
 TOOL_CONFIGS: dict[ToolName, type[BaseModel]] = {
     ToolName.SCHEMATHESIS: SchemathesisConfig,
@@ -25,9 +39,9 @@ TOOL_DESCRIPTIONS: dict[ToolName, str] = {
     ToolName.MUTATION: "Contract-level mutation testing of pytest suites (stub)",
 }
 
-PROBLEMS: dict[int | str, dict[str, Any]] = {
-    422: {"model": ProblemDetail, "description": "Validation error"},
-}
+
+def _problems(*statuses: int) -> dict[int | str, dict[str, Any]]:
+    return {status: {"model": ProblemDetail} for status in statuses}
 
 
 def get_settings(request: Request) -> Settings:
@@ -35,9 +49,21 @@ def get_settings(request: Request) -> Settings:
     return settings
 
 
-SettingsDep = Annotated[Settings, Depends(get_settings)]
+def get_store(request: Request) -> RunStore:
+    store: RunStore = request.app.state.store
+    return store
 
-router = APIRouter(responses=PROBLEMS)
+
+def get_http(request: Request) -> httpx2.AsyncClient:
+    client: httpx2.AsyncClient = request.app.state.http
+    return client
+
+
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+StoreDep = Annotated[RunStore, Depends(get_store)]
+HttpDep = Annotated[httpx2.AsyncClient, Depends(get_http)]
+
+router = APIRouter(responses=_problems(422))
 
 
 @router.get("/tools", response_model=list[ToolInfo], tags=["tools"])
@@ -52,3 +78,54 @@ def list_tools(settings: SettingsDep) -> list[ToolInfo]:
         )
         for tool, config in TOOL_CONFIGS.items()
     ]
+
+
+@router.post(
+    "/runs",
+    status_code=202,
+    response_model=RunCreated,
+    tags=["runs"],
+    responses=_problems(429, 503),
+)
+async def create_run(
+    body: RunCreateRequest,
+    response: Response,
+    settings: SettingsDep,
+    store: StoreDep,
+    http: HttpDep,
+    idempotency_key: Annotated[str | None, Header()] = None,
+) -> RunCreated:
+    if idempotency_key is not None and (known := store.by_idempotency_key(idempotency_key)):
+        return _created(known, response)
+    if store.active_count() >= settings.max_active_runs:
+        raise ApiError(
+            429,
+            ErrorCode.TOO_MANY_RUNS,
+            f"{settings.max_active_runs} runs are already active",
+            headers={"Retry-After": str(max(1, math.ceil(settings.tool_delay_s)))},
+        )
+    check_path_regexes(body)
+    contract = await load_contract(body.contract, http)
+    check_tools_available(body, settings.unavailable_tools)
+    check_test_suites(body)
+
+    record = RunRecord.new(body, contract, settings.api_prefix)
+    store.add(record, idempotency_key)
+    return _created(record, response)
+
+
+@router.get("/runs/{run_id}", response_model=RunStatus, tags=["runs"], responses=_problems(404))
+def get_run(run_id: str, store: StoreDep) -> RunStatus:
+    return _record(store, run_id).status_view()
+
+
+def _created(record: RunRecord, response: Response) -> RunCreated:
+    response.headers["Location"] = record.links.self
+    return record.created_view()
+
+
+def _record(store: RunStore, run_id: str) -> RunRecord:
+    record = store.get(run_id)
+    if record is None:
+        raise ApiError(404, ErrorCode.RUN_NOT_FOUND, f"run {run_id} not found")
+    return record
