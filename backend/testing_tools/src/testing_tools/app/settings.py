@@ -1,33 +1,35 @@
-import os
-from collections.abc import Mapping
-from dataclasses import dataclass, field
+from typing import Annotated, Any, ClassVar
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from testing_tools.api.schemas import ToolName
 
 VERSION = "0.0.1"
 
 
-@dataclass(frozen=True)
-class Settings:
-    api_prefix: str = "/api/v0"
-    version: str = VERSION
-    tool_delay_s: float = 1.0
-    """Simulated duration of each stub tool."""
-    max_active_runs: int = 16
-    unavailable_tools: frozenset[ToolName] = field(default_factory=frozenset)
+class Settings(BaseSettings):
+    """Read from TT_* process env, then `.env` in the working directory; see `.env.example`."""
 
+    model_config = SettingsConfigDict(env_prefix="TT_", env_file=".env", frozen=True)
+
+    version: ClassVar[str] = VERSION
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=8000, ge=1, le=65535)
+    api_prefix: str = "/api/v0"
+    tool_delay_s: float = Field(default=1.0, ge=0)
+    """Simulated duration of each stub tool."""
+    max_active_runs: int = Field(default=16, ge=1)
+    unavailable_tools: Annotated[frozenset[ToolName], NoDecode] = frozenset()
+    """Comma-separated in env: `microcks,mutation`."""
+
+    @field_validator("unavailable_tools", mode="before")
     @classmethod
-    def from_env(cls, env: Mapping[str, str] = os.environ) -> "Settings":
-        defaults = cls()
-        unavailable = env.get("TT_UNAVAILABLE_TOOLS", "")
-        return cls(
-            api_prefix=env.get("TT_API_PREFIX", defaults.api_prefix),
-            tool_delay_s=float(env.get("TT_TOOL_DELAY_S", defaults.tool_delay_s)),
-            max_active_runs=int(env.get("TT_MAX_ACTIVE_RUNS", defaults.max_active_runs)),
-            unavailable_tools=frozenset(
-                ToolName(name.strip()) for name in unavailable.split(",") if name.strip()
-            ),
-        )
+    def _split_tools(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return frozenset(name.strip() for name in value.split(",") if name.strip())
+        return value
 
     def tool_available(self, tool: ToolName) -> bool:
         return tool not in self.unavailable_tools

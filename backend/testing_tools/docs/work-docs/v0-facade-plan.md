@@ -89,7 +89,7 @@ backend/testing_tools/
 
 ## Итог
 
-- 58 тестов, `mypy --strict` чистый; ручной smoke через uvicorn + curl пройден.
+- 64 теста, `mypy --strict` чистый; ручной smoke через uvicorn + curl пройден.
 - Отступления от `API.md`:
   - неизвестный маршрут / метод отдают стандартный ответ FastAPI, а не ProblemDetail —
     подходящего `ErrorCode` в контракте нет;

@@ -14,6 +14,7 @@
   `StubEngine` + `stub_results.py`: каждый инструмент «работает» `TT_TOOL_DELAY_S` секунд
   и возвращает правдоподобный результат, посчитанный по контракту.
 - Всё состояние хранится в памяти процесса и пропадает при рестарте.
+- Настройки — `TT_*` из окружения или `.env`, шаблон — `.env.example`.
 - Python 3.14, `mypy --strict`, тесты на pytest. Комментарии в коде — на английском.
 
 ## Карта модулей
@@ -22,10 +23,10 @@
 
 | Модуль                | Отвечает за                                                                 |
 |-----------------------|------------------------------------------------------------------------------|
-| `__init__.py`         | `main()` — точка входа `uv run testing-tools`: настраивает logging, запускает uvicorn с фабрикой `create_app`, адрес берёт из `TT_HOST`/`TT_PORT` |
+| `__init__.py`         | `main()` — точка входа `uv run testing-tools`: настраивает logging, запускает uvicorn с фабрикой `create_app`, адрес берёт из `Settings` (`host`/`port`) |
 | `api/schemas.py`      | Контракт: модели запросов и ответов, enum'ы, `ErrorCode`. **Источник истины — не менять без правки `API.md`** |
 | `app/main.py`         | `create_app(settings, transport)` — собирает приложение: state, обработчики ошибок, роутер, `/health`, lifespan |
-| `app/settings.py`     | `Settings` (frozen dataclass) и `Settings.from_env()` — чтение `TT_*`      |
+| `app/settings.py`     | `Settings` — `pydantic-settings`, читает `TT_*` из окружения и `.env`      |
 | `app/routes.py`       | Все эндпоинты под префиксом, зависимости `SettingsDep`/`StoreDep`/`EngineDep`/`HttpDep` |
 | `app/errors.py`       | `ApiError` и обработчики, которые превращают исключения в `application/problem+json` |
 | `app/validation.py`   | Проверки тела запроса, которые не выражаются Pydantic-схемой               |
@@ -155,10 +156,21 @@
 наблюдаемым считается каждый явный код (`"404"` → 404) и диапазон (`"4XX"` → 400);
 `default` остаётся непокрытым. Недокументированных кодов нет.
 
-## Настройки
+## Настройки (`app/settings.py`)
 
-Переменные `TT_*` перечислены в [README](../README.md). `Settings` — frozen dataclass,
-в тестах его создают напрямую: `Settings(tool_delay_s=0, ...)`.
+- `Settings` — frozen `BaseSettings` из `pydantic-settings` с `env_prefix="TT_"`.
+  Значения берутся из аргументов конструктора, потом из окружения процесса,
+  потом из `.env` в **текущем рабочем каталоге**, потом из значений по умолчанию.
+- Все ключи с комментариями — в [`.env.example`](../.env.example), таблица — в
+  [README](../README.md). Тест `test_env_example_lists_exactly_the_settings` следит,
+  чтобы шаблон совпадал с полями `Settings`. Новое поле без строки в `.env.example`
+  этот тест уронит.
+- `unavailable_tools` в env задаётся строкой через запятую (`NoDecode` + валидатор),
+  неизвестное имя инструмента — ошибка при старте.
+- `version` — `ClassVar`, из env не настраивается.
+- В тестах `Settings(tool_delay_s=0, ...)` создаётся напрямую. Автофикстура
+  `isolated_env` в `conftest.py` убирает `TT_*` из окружения и переходит в `tmp_path`,
+  чтобы локальный `.env` разработчика не влиял на тесты.
 
 ## Тесты
 
@@ -166,7 +178,7 @@
 
 | Файл                       | Что покрывает                                                        |
 |----------------------------|----------------------------------------------------------------------|
-| `conftest.py`              | фикстура `client` — `TestClient` поверх `create_app(Settings(tool_delay_s=0))`; `anyio_backend` для async-тестов |
+| `conftest.py`              | автофикстура `isolated_env` (без `TT_*` и `.env`); фикстура `client` — `TestClient` поверх `create_app(Settings(tool_delay_s=0))`; `anyio_backend` для async-тестов |
 | `petstore.py`              | эталонный контракт (4 операции) и `inline_contract()`, общие для всех тестов |
 | `test_settings.py`, `test_health.py`, `test_tools_endpoint.py`, `test_entrypoint.py` | настройки, `/health`, `/tools`, `main()` |
 | `test_errors.py`           | формат ProblemDetail на временных маршрутах внутри теста             |
@@ -188,6 +200,8 @@
   потом маршрут в `routes.py` и при необходимости `*_view()` в `store.py`.
 - **Новая проверка запроса**: функция в `validation.py`, вызов в `create_run` на месте,
   соответствующем порядку из `API.md`.
+- **Новая настройка**: поле в `Settings` и строка в `.env.example` (иначе упадёт тест),
+  строка в таблице README.
 - **Сменить префикс** (`v0` → `v1`): `TT_API_PREFIX` или значение по умолчанию в `Settings`;
   `links` и `Location` строятся от префикса.
 - **Подключить настоящий инструмент**: шлюзу важно только то, что движок заполняет

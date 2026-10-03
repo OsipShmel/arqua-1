@@ -17,7 +17,7 @@ def create_app(
     settings: Settings | None = None, transport: httpx2.AsyncBaseTransport | None = None
 ) -> FastAPI:
     """`transport` replaces the network for contract downloads (tests)."""
-    settings = settings or Settings.from_env()
+    settings = settings or Settings()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
