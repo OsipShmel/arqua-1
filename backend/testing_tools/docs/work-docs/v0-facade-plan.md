@@ -62,7 +62,7 @@ backend/testing_tools/
 «работает» каждый инструмент, чтобы поллинг видел `running`), `TT_MAX_ACTIVE_RUNS` (`16`),
 `TT_UNAVAILABLE_TOOLS` (через запятую — для проверки `503`/`degraded`), `TT_HOST`, `TT_PORT`.
 
-Зависимости: `fastapi`, `uvicorn`, `httpx2`, `pyyaml`; dev — `pytest`.
+Зависимости: `fastapi`, `uvicorn`, `httpx2`, `pyyaml`; dev — `pytest`, `mypy` (strict).
 
 ## Этапы (каждый — сначала тесты, потом код, коммит в ветку `feat/testing-api-gateway`)
 
@@ -80,7 +80,7 @@ backend/testing_tools/
 ## Статус
 
 - [x] 1. Каркас
-- [ ] 2. Ошибки и /tools
+- [x] 2. Ошибки и /tools
 - [ ] 3. Контракт
 - [ ] 4. Создание и статус прогона
 - [ ] 5. Движок

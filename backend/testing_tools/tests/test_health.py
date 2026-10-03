@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from testing_tools.api.schemas import ToolName
 from testing_tools.app.main import create_app
 from testing_tools.app.settings import Settings
 
@@ -16,7 +17,7 @@ def test_health_ok_when_all_tools_available(client: TestClient) -> None:
 
 
 def test_health_degraded_when_a_tool_is_unavailable() -> None:
-    settings = Settings(unavailable_tools=frozenset({"microcks"}))
+    settings = Settings(unavailable_tools=frozenset({ToolName.MICROCKS}))
     with TestClient(create_app(settings)) as client:
         body = client.get("/health").json()
 
