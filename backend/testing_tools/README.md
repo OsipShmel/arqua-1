@@ -6,6 +6,8 @@ HTTP-шлюз к black-box инструментам тестирования API
 **v0**: все эндпоинты, валидация и ошибки настоящие, инструменты — заглушки
 (см. [`docs/work-docs/v0-facade-plan.md`](docs/work-docs/v0-facade-plan.md)). Маршруты — под `/api/v0`.
 
+Как шлюз устроен внутри — [`docs/gateway.md`](docs/gateway.md).
+
 ## Запуск
 
 ```bash
