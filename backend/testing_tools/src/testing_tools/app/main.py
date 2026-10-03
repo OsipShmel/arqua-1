@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -5,6 +6,7 @@ import httpx2
 from fastapi import FastAPI
 
 from testing_tools.api.schemas import HealthResponse, HealthState, ToolName
+from testing_tools.app.engine import StubEngine
 from testing_tools.app.errors import install_error_handlers
 from testing_tools.app.routes import router
 from testing_tools.app.settings import Settings
@@ -22,10 +24,15 @@ def create_app(
         async with httpx2.AsyncClient(transport=transport) as http:
             app.state.http = http
             yield
+        tasks = [r.task for r in app.state.store.all() if r.task and not r.task.done()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     app = FastAPI(title="testing_tools", version=settings.version, lifespan=lifespan)
     app.state.settings = settings
     app.state.store = RunStore()
+    app.state.engine = StubEngine(settings)
     install_error_handlers(app)
     app.include_router(router, prefix=settings.api_prefix)
 

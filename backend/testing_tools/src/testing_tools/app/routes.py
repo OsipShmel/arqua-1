@@ -18,6 +18,7 @@ from testing_tools.api.schemas import (
     ToolName,
 )
 from testing_tools.app.contract import load_contract
+from testing_tools.app.engine import StubEngine
 from testing_tools.app.errors import ApiError
 from testing_tools.app.settings import Settings
 from testing_tools.app.store import RunRecord, RunStore
@@ -54,6 +55,11 @@ def get_store(request: Request) -> RunStore:
     return store
 
 
+def get_engine(request: Request) -> StubEngine:
+    engine: StubEngine = request.app.state.engine
+    return engine
+
+
 def get_http(request: Request) -> httpx2.AsyncClient:
     client: httpx2.AsyncClient = request.app.state.http
     return client
@@ -62,6 +68,7 @@ def get_http(request: Request) -> httpx2.AsyncClient:
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StoreDep = Annotated[RunStore, Depends(get_store)]
 HttpDep = Annotated[httpx2.AsyncClient, Depends(get_http)]
+EngineDep = Annotated[StubEngine, Depends(get_engine)]
 
 router = APIRouter(responses=_problems(422))
 
@@ -93,6 +100,7 @@ async def create_run(
     settings: SettingsDep,
     store: StoreDep,
     http: HttpDep,
+    engine: EngineDep,
     idempotency_key: Annotated[str | None, Header()] = None,
 ) -> RunCreated:
     if idempotency_key is not None and (known := store.by_idempotency_key(idempotency_key)):
@@ -111,6 +119,7 @@ async def create_run(
 
     record = RunRecord.new(body, contract, settings.api_prefix)
     store.add(record, idempotency_key)
+    engine.start(record)
     return _created(record, response)
 
 
