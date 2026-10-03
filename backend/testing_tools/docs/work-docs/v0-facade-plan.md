@@ -84,5 +84,5 @@ backend/testing_tools/
 - [x] 3. Контракт
 - [x] 4. Создание и статус прогона
 - [x] 5. Движок
-- [ ] 6. result / cancel / artifacts
+- [x] 6. result / cancel / artifacts
 - [ ] 7. Запуск

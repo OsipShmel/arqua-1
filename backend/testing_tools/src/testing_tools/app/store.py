@@ -6,17 +6,28 @@ from uuid import UUID, uuid4
 from testing_tools.api.schemas import (
     TERMINAL_RUN_STATES,
     ErrorInfo,
+    MicrocksResult,
+    MutationResult,
     RunCreated,
     RunCreateRequest,
     RunLinks,
+    RunResult,
     RunState,
     RunStatus,
+    SchemathesisResult,
     ToolConfig,
+    ToolName,
     ToolProgress,
     ToolResult,
     ToolState,
 )
 from testing_tools.app.contract import LoadedContract
+
+RESULT_TYPES: dict[ToolName, type[SchemathesisResult | MicrocksResult | MutationResult]] = {
+    ToolName.SCHEMATHESIS: SchemathesisResult,
+    ToolName.MICROCKS: MicrocksResult,
+    ToolName.MUTATION: MutationResult,
+}
 
 
 def utcnow() -> datetime:
@@ -49,6 +60,17 @@ class ToolRun:
             error=self.error,
         )
 
+    def result_view(self) -> ToolResult:
+        if self.result is not None:
+            return self.result
+        # tool never produced a result: cancelled, skipped or interrupted
+        return RESULT_TYPES[self.config.tool](
+            state=self.state,
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+            error=self.error,
+        )
+
 
 @dataclass
 class RunRecord:
@@ -66,7 +88,9 @@ class RunRecord:
     task: asyncio.Task[None] | None = None
 
     @classmethod
-    def new(cls, request: RunCreateRequest, contract: LoadedContract, api_prefix: str) -> "RunRecord":
+    def new(
+        cls, request: RunCreateRequest, contract: LoadedContract, api_prefix: str
+    ) -> "RunRecord":
         run_id = uuid4()
         base = f"{api_prefix}/runs/{run_id}"
         return cls(
@@ -97,6 +121,26 @@ class RunRecord:
             labels=self.request.labels,
             error=self.error,
             links=self.links,
+        )
+
+    def result_view(self) -> RunResult:
+        duration = (
+            (self.finished_at - self.started_at).total_seconds()
+            if self.started_at and self.finished_at
+            else None
+        )
+        return RunResult(
+            run_id=self.run_id,
+            state=self.state,
+            created_at=self.created_at,
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+            duration_s=duration,
+            labels=self.request.labels,
+            contract=self.contract.info,
+            target_base_url=str(self.request.target.base_url),
+            tools=[tool.result_view() for tool in self.tools],
+            error=self.error,
         )
 
 

@@ -12,6 +12,7 @@ from testing_tools.api.schemas import (
     ProblemDetail,
     RunCreated,
     RunCreateRequest,
+    RunResult,
     RunStatus,
     SchemathesisConfig,
     ToolInfo,
@@ -126,6 +127,44 @@ async def create_run(
 @router.get("/runs/{run_id}", response_model=RunStatus, tags=["runs"], responses=_problems(404))
 def get_run(run_id: str, store: StoreDep) -> RunStatus:
     return _record(store, run_id).status_view()
+
+
+@router.get(
+    "/runs/{run_id}/result", response_model=RunResult, tags=["runs"], responses=_problems(404, 409)
+)
+def get_run_result(run_id: str, store: StoreDep) -> RunResult:
+    record = _record(store, run_id)
+    if not record.finished:
+        raise ApiError(409, ErrorCode.RUN_NOT_FINISHED, f"run is {record.state.value}")
+    return record.result_view()
+
+
+@router.post(
+    "/runs/{run_id}/cancel",
+    status_code=202,
+    response_model=RunStatus,
+    tags=["runs"],
+    responses=_problems(404, 409),
+)
+def cancel_run(run_id: str, store: StoreDep, engine: EngineDep) -> RunStatus:
+    record = _record(store, run_id)
+    if record.finished:
+        raise ApiError(409, ErrorCode.RUN_ALREADY_FINISHED, f"run is {record.state.value}")
+    engine.cancel(record)
+    return record.status_view()
+
+
+@router.get(
+    "/runs/{run_id}/artifacts/{name}",
+    response_class=Response,
+    tags=["runs"],
+    responses={200: {"content": {"application/octet-stream": {}}}, **_problems(404)},
+)
+def get_artifact(run_id: str, name: str, store: StoreDep) -> Response:
+    artifact = _record(store, run_id).artifacts.get(name)
+    if artifact is None:
+        raise ApiError(404, ErrorCode.ARTIFACT_NOT_FOUND, f"artifact {name} not found")
+    return Response(artifact.content, media_type=artifact.media_type)
 
 
 def _created(record: RunRecord, response: Response) -> RunCreated:
