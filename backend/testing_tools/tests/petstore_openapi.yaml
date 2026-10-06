@@ -1,0 +1,90 @@
+openapi: 3.0.3
+info:
+  title: Buggy Petstore
+  version: 1.0.0
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Pet"}
+              examples:
+                all:
+                  value: [{id: 1, name: rex, tag: dog}]
+    post:
+      operationId: createPet
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewPet"}
+            examples:
+              tom:
+                value: {name: tom}
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Pet"}
+              examples:
+                tom:
+                  value: {id: 2, name: tom}
+        "422":
+          description: invalid
+  /pets/{petId}:
+    get:
+      operationId: getPet
+      tags: [pets]
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema: {type: integer}
+          examples:
+            rex: {value: 1}
+            unknown: {value: 999}
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Pet"}
+              examples:
+                rex:
+                  value: {id: 1, name: rex, tag: dog}
+        "404":
+          description: not found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [detail]
+                properties:
+                  detail: {type: string}
+              examples:
+                unknown:
+                  value: {detail: not found}
+components:
+  schemas:
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        tag: {type: string}
+    Pet:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        tag: {type: string}

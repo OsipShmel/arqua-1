@@ -19,10 +19,11 @@ from testing_tools.api.schemas import (
     ToolName,
 )
 from testing_tools.app.contract import load_contract
-from testing_tools.app.engine import StubEngine
+from testing_tools.app.engine import Engine
 from testing_tools.app.errors import ApiError
-from testing_tools.app.settings import Settings
+from testing_tools.app.settings import Settings, ToolMode
 from testing_tools.app.store import RunRecord, RunStore
+from testing_tools.app.tools.schemathesis import schemathesis_version
 from testing_tools.app.validation import (
     check_path_regexes,
     check_test_suites,
@@ -36,10 +37,20 @@ TOOL_CONFIGS: dict[ToolName, type[BaseModel]] = {
 }
 
 TOOL_DESCRIPTIONS: dict[ToolName, str] = {
-    ToolName.SCHEMATHESIS: "Property-based API fuzzing (stub)",
-    ToolName.MICROCKS: "Contract testing by OpenAPI examples (stub)",
-    ToolName.MUTATION: "Contract-level mutation testing of pytest suites (stub)",
+    ToolName.SCHEMATHESIS: "Property-based API fuzzing",
+    ToolName.MICROCKS: "Contract testing by OpenAPI examples",
+    ToolName.MUTATION: "Contract-level mutation testing of pytest suites",
 }
+
+
+def _tool_version(settings: Settings, tool: ToolName) -> str | None:
+    if not settings.tool_available(tool):
+        return None
+    if settings.tool_mode == ToolMode.STUB or tool == ToolName.MUTATION:
+        return settings.version
+    if tool == ToolName.SCHEMATHESIS:
+        return schemathesis_version()
+    return None  # Microcks does not report its version over the API
 
 
 def _problems(*statuses: int) -> dict[int | str, dict[str, Any]]:
@@ -56,8 +67,8 @@ def get_store(request: Request) -> RunStore:
     return store
 
 
-def get_engine(request: Request) -> StubEngine:
-    engine: StubEngine = request.app.state.engine
+def get_engine(request: Request) -> Engine:
+    engine: Engine = request.app.state.engine
     return engine
 
 
@@ -69,7 +80,7 @@ def get_http(request: Request) -> httpx2.AsyncClient:
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 StoreDep = Annotated[RunStore, Depends(get_store)]
 HttpDep = Annotated[httpx2.AsyncClient, Depends(get_http)]
-EngineDep = Annotated[StubEngine, Depends(get_engine)]
+EngineDep = Annotated[Engine, Depends(get_engine)]
 
 router = APIRouter(responses=_problems(422))
 
@@ -80,8 +91,9 @@ def list_tools(settings: SettingsDep) -> list[ToolInfo]:
         ToolInfo(
             tool=tool,
             available=settings.tool_available(tool),
-            version=settings.version if settings.tool_available(tool) else None,
-            description=TOOL_DESCRIPTIONS[tool],
+            version=_tool_version(settings, tool),
+            description=TOOL_DESCRIPTIONS[tool]
+            + (" (stub)" if settings.tool_mode == ToolMode.STUB else ""),
             config_schema=config.model_json_schema(),
         )
         for tool, config in TOOL_CONFIGS.items()
@@ -115,7 +127,7 @@ async def create_run(
         )
     check_path_regexes(body)
     contract = await load_contract(body.contract, http)
-    check_tools_available(body, settings.unavailable_tools)
+    check_tools_available(body, settings.down_tools())
     check_test_suites(body)
 
     record = RunRecord.new(body, contract, settings.api_prefix)

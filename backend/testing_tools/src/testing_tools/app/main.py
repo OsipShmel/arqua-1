@@ -6,7 +6,7 @@ import httpx2
 from fastapi import FastAPI
 
 from testing_tools.api.schemas import HealthResponse, HealthState, ToolName
-from testing_tools.app.engine import StubEngine
+from testing_tools.app.engine import Engine
 from testing_tools.app.errors import install_error_handlers
 from testing_tools.app.routes import router
 from testing_tools.app.settings import Settings
@@ -32,7 +32,7 @@ def create_app(
     app = FastAPI(title="testing_tools", version=settings.version, lifespan=lifespan)
     app.state.settings = settings
     app.state.store = RunStore()
-    app.state.engine = StubEngine(settings)
+    app.state.engine = Engine(settings)
     install_error_handlers(app)
     app.include_router(router, prefix=settings.api_prefix)
 

@@ -2,7 +2,7 @@ import hashlib
 import json
 import re
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, TypeGuard
 
 import httpx2
@@ -35,6 +35,8 @@ class ContractOperation:
 class LoadedContract:
     info: ContractInfo
     operations: tuple[ContractOperation, ...]
+    document: dict[str, Any] = field(default_factory=dict, compare=False, repr=False)
+    """The parsed OpenAPI document, as received; tool runners read schemas from it."""
 
 
 async def load_contract(source: ContractSource, client: httpx2.AsyncClient) -> LoadedContract:
@@ -75,6 +77,7 @@ def parse_contract(text: str) -> LoadedContract:
             sha256=hashlib.sha256(text.encode()).hexdigest(),
         ),
         operations=operations,
+        document=doc,
     )
 
 

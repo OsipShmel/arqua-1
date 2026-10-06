@@ -84,7 +84,9 @@ run при этом всё равно `completed`.
 5. Для `mutation` с `kind=inline` — что `files` не пустой и пути относительные,
    без `..` → `422 test_suite_invalid`.
 
-Доступность `target.base_url` проверяется уже в прогоне (сервис может подниматься).
+Доступность `target.base_url` проверяется уже в прогоне (сервис может подниматься):
+`GET base_url`, до 3 попыток с паузой 1 с, годится любой HTTP-ответ. Если соединиться
+не удалось — прогон `failed` с `error.code=target_unreachable`, инструменты `skipped`.
 Если очередь заполнена → `429 too_many_runs` с заголовком `Retry-After`.
 
 Опциональный заголовок `Idempotency-Key`: повторный `POST` с тем же ключом в течение
@@ -153,6 +155,12 @@ run при этом всё равно `completed`.
 
 `SchemathesisPhase`: `examples`, `coverage`, `fuzzing`, `stateful`.
 
+`operations` применяется до запуска: Schemathesis получает копию контракта только с
+выбранными операциями. Проверка `max_response_time` включается флагом
+`--max-response-time` и работает, только если задан `max_response_time_ms`.
+При `checks=null` запускаются все проверки Schemathesis, включая те, которых нет в
+`SchemathesisCheck` (например, `allow_header_conformance`): `Finding.check` — строка.
+
 `target.base_url` → `--url`, `target.headers` → `--header`,
 `target.request_timeout_s` → `--request-timeout`, `target.tls_verify` → `--tls-verify`.
 Сырые отчёты (`--report junit,ndjson,har`) сохранять как артефакты.
@@ -175,6 +183,9 @@ Microcks тестирует только операции, для которых
 | `cleanup`             | bool                            | `true`              | удалить сервис после теста |
 
 `target.headers` мержатся в `operations_headers["globals"]` (явный `globals` побеждает).
+Microcks сам ходит в `target.base_url`, поэтому адрес должен быть достижим из сети
+Microcks. В находках Microcks `request.url` — шаблон пути (`/pets/{petId}`): Microcks
+не отдаёт итоговый URL запроса.
 
 #### `mutation`
 
@@ -214,6 +225,21 @@ Microcks тестирует только операции, для которых
 | `git`    | `repo_url`, `ref` (`"HEAD"`), `subdir` (`"."`)             |
 
 `MutationOperator`: `change_field_type`, `remove_required_field`, `replace_status_code`.
+
+Детали реализации, важные для агента:
+
+- `replace_status_code`: 2xx/3xx → 500, 4xx/5xx → 200; ответ `default` не мутируется.
+- Поля берутся из JSON-схемы ответа (с `$ref` и `allOf`, до 4 уровней вложенности).
+  В `Mutant.location` элемент массива обозначается `*`: `/*/id` — поле `id` в каждом
+  элементе массива.
+- Мутантные прогоны запускают только тесты, прошедшие baseline (`--deselect` для остальных).
+- `no_coverage`: на baseline тесты ни разу не получили ответ, который ломает мутант,
+  или мутация ни разу не применилась (например, необязательного поля не было в ответе).
+  Если на baseline не прошёл ни один тест, все мутанты — `no_coverage`.
+- Ошибки сбора тестов не останавливают pytest (`--continue-on-collection-errors`).
+- Если baseline не уложился в `per_mutant_timeout_s`, инструмент завершается с `error`
+  (`timeout`); если pytest не смог запустить набор (например, неизвестный флаг в
+  `pytest_args`) — `error` с `test_suite_invalid` и хвостом вывода в `details.output_tail`.
 
 ### Пример запроса
 

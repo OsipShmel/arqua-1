@@ -15,7 +15,7 @@ from testing_tools.api.schemas import (
     ToolState,
 )
 from testing_tools.app.contract import parse_contract
-from testing_tools.app.engine import StubEngine
+from testing_tools.app.engine import Engine
 from testing_tools.app.settings import Settings
 from testing_tools.app.store import RunRecord
 
@@ -36,7 +36,7 @@ def make_record(*tools: dict[str, Any]) -> RunRecord:
 
 
 async def run_fast(record: RunRecord) -> None:
-    await StubEngine(Settings(tool_delay_s=0)).run(record, timeout_s=10)
+    await Engine(Settings(tool_delay_s=0)).run(record, timeout_s=10)
 
 
 async def test_run_completes_with_results_in_request_order() -> None:
@@ -151,7 +151,7 @@ async def test_artifact_holds_tool_result() -> None:
 async def test_run_times_out() -> None:
     record = make_record({"tool": "schemathesis"}, {"tool": "microcks"})
 
-    await StubEngine(Settings(tool_delay_s=5)).run(record, timeout_s=0.05)
+    await Engine(Settings(tool_delay_s=5)).run(record, timeout_s=0.05)
 
     assert record.state == RunState.TIMED_OUT
     assert record.error is not None and record.error.code == ErrorCode.TIMEOUT
@@ -162,7 +162,7 @@ async def test_run_times_out() -> None:
 
 
 async def test_cancel_running_run() -> None:
-    engine = StubEngine(Settings(tool_delay_s=5))
+    engine = Engine(Settings(tool_delay_s=5))
     record = make_record({"tool": "schemathesis"}, {"tool": "microcks"})
     engine.start(record)
     while record.tools[0].state != ToolState.RUNNING:
@@ -178,7 +178,7 @@ async def test_cancel_running_run() -> None:
 
 
 async def test_cancel_before_start() -> None:
-    engine = StubEngine(Settings(tool_delay_s=5))
+    engine = Engine(Settings(tool_delay_s=5))
     record = make_record({"tool": "schemathesis"})
     engine.start(record)
 
