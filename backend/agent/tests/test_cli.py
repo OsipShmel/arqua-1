@@ -107,7 +107,9 @@ def test_error_redacts_provider_key(arguments, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "secret-probe-key" not in captured.out + captured.err
     result = json.loads(captured.out)
-    assert "secret-probe-key" not in Path(result["artifacts"]["json"]).read_text()
+    assert "secret-probe-key" not in Path(result["artifacts"]["json"]).read_text(
+        encoding="utf-8"
+    )
 
 
 def test_error_result_from_agent_is_not_success(arguments, monkeypatch, capsys):
