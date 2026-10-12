@@ -51,12 +51,16 @@ def build_qa_agent():
     return create_agent(model=llm, tools=TOOLS, system_prompt=SYSTEM_PROMPT)
 
 
-def run_qa_agent(task: str) -> Dict[str, Any]:
+def run_qa_agent(task: str, *, max_steps: int = 25) -> Dict[str, Any]:
     """Единая точка входа для вызова агента."""
+    if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
+        raise ValueError("max_steps должен быть положительным целым числом")
     agent_app = build_qa_agent()
 
     # Запуск цикла
-    state = agent_app.invoke({"messages": [("user", task)]})
+    state = agent_app.invoke(
+        {"messages": [("user", task)]}, config={"recursion_limit": max_steps}
+    )
 
     # Забираем последнее сообщение (финальный ответ модели)
     final_message = state["messages"][-1].content

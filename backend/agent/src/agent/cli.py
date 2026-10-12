@@ -7,13 +7,13 @@ import json
 import math
 import os
 import sys
-from contextlib import redirect_stdout
 from datetime import datetime, timezone
 from importlib.metadata import version
 from pathlib import Path
 from uuid import uuid4
 
 from agent.contracts import http_url, read_contract
+from agent.runner import invoke_agent
 
 
 def positive_seconds(value: str) -> float:
@@ -35,6 +35,16 @@ def base_url(value: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def positive_integer(value: str) -> int:
+    try:
+        result = int(value)
+        if result < 1:
+            raise ValueError
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("Нужно положительное целое число") from exc
+    return result
+
+
 def parser() -> argparse.ArgumentParser:
     app = argparse.ArgumentParser(
         prog="arqa-testgen",
@@ -44,6 +54,10 @@ def parser() -> argparse.ArgumentParser:
         "--version", action="version", version=f"%(prog)s {version('agent')}"
     )
     commands = app.add_subparsers(dest="command", required=True)
+    doctor = commands.add_parser(
+        "doctor", help="Проверить окружение и настройки без запросов к LLM"
+    )
+    doctor.add_argument("--format", choices=("text", "json"), default="text")
     generate = commands.add_parser("generate", help="Передать контракт QA-агенту")
     generate.add_argument(
         "contract", help="Путь или HTTP(S) URL к OpenAPI 3.x JSON/YAML"
@@ -62,6 +76,18 @@ def parser() -> argparse.ArgumentParser:
         type=positive_seconds,
         default=10.0,
         help="Таймаут загрузки контракта по URL, секунд (10)",
+    )
+    generate.add_argument(
+        "--agent-timeout",
+        type=positive_seconds,
+        default=300.0,
+        help="Максимальное время процесса агента, секунд (300)",
+    )
+    generate.add_argument(
+        "--max-steps",
+        type=positive_integer,
+        default=25,
+        help="Максимальное число шагов графа агента (25)",
     )
     return app
 
@@ -96,6 +122,8 @@ def write_reports(directory: Path, report: dict) -> None:
         f"- Начало (UTC): {report['started_at']}\n"
         f"- Окончание (UTC): {report['finished_at']}\n"
         f"- Сервис: {report['target_base_url']}\n\n"
+        f"- Таймаут агента: {report['limits']['agent_timeout']:g} секунд\n"
+        f"- Предел шагов графа: {report['limits']['max_steps']}\n\n"
         "**Демонстрационный режим:** tools пока являются заглушками. "
         "Реальные тесты и фаззинг не выполнялись; pytest-код и метрики не предоставлены.\n\n"
     )
@@ -135,6 +163,7 @@ def execute(args: argparse.Namespace) -> int:
         "generated_tests": [],
         "error": None,
         "artifacts": {},
+        "limits": {"agent_timeout": args.agent_timeout, "max_steps": args.max_steps},
     }
     code = 1
     directory_created = False
@@ -145,11 +174,11 @@ def execute(args: argparse.Namespace) -> int:
         context = read_contract(args.contract, timeout=args.contract_timeout)
         report["contract"] = context.metadata()
         print("Вызываю агент (tools в демонстрационном режиме)...", file=sys.stderr)
-        # Lazy import keeps help/version/input errors independent of LLM configuration.
-        from agent.agent import run_qa_agent
-
-        with redirect_stdout(sys.stderr):
-            result = run_qa_agent(context.task(args.base_url))
+        result = invoke_agent(
+            context.task(args.base_url),
+            timeout=args.agent_timeout,
+            max_steps=args.max_steps,
+        )
         if not isinstance(result, dict) or result.get("status") not in {
             "success",
             "error",
@@ -162,9 +191,13 @@ def execute(args: argparse.Namespace) -> int:
         report["status"] = result["status"]
         if result["status"] == "error":
             report["error"] = {
-                "type": "AgentError",
-                "message": output_text(
-                    result.get("error", result.get("output", "Ошибка агента"))
+                "type": result.get("error_type", "AgentError"),
+                "message": error_message(
+                    RuntimeError(
+                        output_text(
+                            result.get("error", result.get("output", "Ошибка агента"))
+                        )
+                    )
                 ),
             }
         code = 0 if result["status"] == "success" else 1
@@ -175,6 +208,10 @@ def execute(args: argparse.Namespace) -> int:
             "message": "Запуск прерван пользователем",
         }
         code = 130
+    except TimeoutError as exc:
+        report["status"] = "timeout"
+        report["error"] = {"type": "TimeoutError", "message": error_message(exc)}
+        code = 124
     except Exception as exc:
         report["error"] = {"type": type(exc).__name__, "message": error_message(exc)}
 
@@ -214,4 +251,18 @@ def main(argv: list[str] | None = None) -> int:
             and (stream.encoding or "").lower().replace("-", "") != "utf8"
         ):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
-    return execute(parser().parse_args(argv))
+    args = parser().parse_args(argv)
+    if args.command == "doctor":
+        from agent.doctor import diagnose
+
+        report = diagnose()
+        if args.format == "json":
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            for check in report["checks"]:
+                print(f"[{check['status']}] {check['name']}: {check['message']}")
+            print(
+                "Проверка локальная; доступность LLM и поддержка tools не проверялись."
+            )
+        return 0 if report["status"] == "ok" else 1
+    return execute(args)

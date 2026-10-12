@@ -36,14 +36,10 @@ class ContractContext:
     contract: OpenAPIContract
 
     def summary(self) -> dict:
-        # raw duplicates the whole input. Keep normalized schemas and references.
-        return self.contract.model_dump(
-            mode="json",
-            by_alias=True,
-            exclude={"raw"},
-            exclude_none=True,
-            exclude_defaults=True,
-        )
+        # Normalized parser models currently omit some OpenAPI fields. Use the
+        # authoritative document once, minified by task(), without a raw copy.
+        # This retains security, reference targets and all JSON Schema keywords.
+        return self.contract.raw
 
     def metadata(self) -> dict:
         return {

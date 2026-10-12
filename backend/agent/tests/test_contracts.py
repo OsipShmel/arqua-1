@@ -52,3 +52,36 @@ def test_invalid_contract_is_rejected(tmp_path, change):
     source.write_text(json.dumps({**SPEC, **change}), encoding="utf-8")
     with pytest.raises(ValueError):
         read_contract(str(source))
+
+
+def test_agent_context_preserves_constraints_security_and_reference_targets(tmp_path):
+    document = {
+        **SPEC,
+        "security": [{"bearerAuth": []}],
+        "components": {
+            "securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}},
+            "schemas": {
+                "Count": {"type": "integer", "multipleOf": 5, "const": 10},
+                "Nullable": {"type": ["string", "null"], "default": None},
+                "Free": True,
+            },
+            "responses": {"Ok": {"description": "Referenced response"}},
+        },
+        "paths": {
+            "/pets": {
+                "get": {
+                    "security": [],
+                    "responses": {"200": {"$ref": "#/components/responses/Ok"}},
+                }
+            }
+        },
+        "x-team-metadata": {"owner": "ARQA"},
+    }
+    source = tmp_path / "complete.json"
+    source.write_text(json.dumps(document), encoding="utf-8")
+    context = read_contract(str(source))
+    task = context.task("http://target.test")
+    provided = task.split("<contract_json>\n", 1)[1].split("\n</contract_json>", 1)[0]
+    assert json.loads(provided) == document
+    assert provided.count('"securitySchemes"') == 1
+    assert '"raw"' not in provided

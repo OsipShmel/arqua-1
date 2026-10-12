@@ -6,6 +6,7 @@
 ```bash
 uv sync --locked --all-packages --all-extras
 uv run --locked arqa-testgen --help
+uv run --locked arqa-testgen doctor
 ```
 
 CLI и настройка модели описаны в [backend/agent/README.md](backend/agent/README.md).
