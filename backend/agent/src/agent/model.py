@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 
@@ -19,13 +21,14 @@ def _init_env() -> None:
             load_dotenv(env_file)
             break
 
-    # Сбрасываем кастомные пути к сертификатам, если они выставлены в системе
-    os.environ.pop("SSL_CERT_FILE", None)
+    # A standalone CLI may be invoked outside the source checkout.
+    # Process environment always wins over either .env file.
+    load_dotenv(Path.cwd() / ".env", override=False)
 
 
 def build_model(
-    temperature: float = 0.0,
-    timeout: float = 60.0,
+    temperature: float | None = None,
+    timeout: float | None = None,
     max_retries: int = 1,
 ) -> ChatOpenAI:
     """
@@ -34,6 +37,15 @@ def build_model(
     :raises RuntimeError: если отсутствуют обязательные переменные окружения.
     """
     _init_env()
+
+    if temperature is None:
+        temperature = float(os.getenv("DEEPCODE_TEMPERATURE", "0"))
+    if timeout is None:
+        timeout = float(os.getenv("DEEPCODE_TIMEOUT", "60"))
+    if not math.isfinite(temperature) or not 0 <= temperature <= 2:
+        raise ValueError("DEEPCODE_TEMPERATURE должна быть конечным числом от 0 до 2")
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("DEEPCODE_TIMEOUT должен быть положительным конечным числом")
 
     api_key = os.getenv("DEEPCODE_API_KEY")
     base_url = os.getenv("DEEPCODE_BASE_URL")
@@ -48,7 +60,9 @@ def build_model(
         missing.append("DEEPCODE_MODEL")
 
     if missing:
-        raise RuntimeError(f"Отсутствуют обязательные переменные окружения: {', '.join(missing)}")
+        raise RuntimeError(
+            f"Отсутствуют обязательные переменные окружения: {', '.join(missing)}"
+        )
 
     return ChatOpenAI(
         model=model_name,

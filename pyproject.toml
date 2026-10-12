@@ -2,10 +2,14 @@
 name = "arqua-1"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = ["agent"]
+
+[tool.uv.sources]
+agent = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "backend/agent",
     "backend/testing_tools",
+    "openapi_parser_project",
 ]

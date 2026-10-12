@@ -93,6 +93,10 @@ class OpenAPIParser:
             raise ValueError(
                 "OpenAPI document must contain 'paths'"
             )
+        if not isinstance(document["info"], dict):
+            raise ValueError("OpenAPI 'info' must be an object")
+        if not isinstance(document["paths"], dict):
+            raise ValueError("OpenAPI 'paths' must be an object")
 
     # ---------------------------------------------------------
     # Info
@@ -360,6 +364,8 @@ class OpenAPIParser:
             return result
 
         for status_code, response in responses.items():
+
+            status_code = str(status_code)
 
             if not isinstance(response, dict):
                 continue

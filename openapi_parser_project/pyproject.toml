@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arqa-openapi-parser"
+version = "0.1.0"
+description = "OpenAPI parser for ARQA-1"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.7,<3", "pyyaml>=6,<7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["openapi_parser"]
