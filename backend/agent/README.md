@@ -136,6 +136,20 @@ uv run --locked --package agent ruff check backend/agent/src backend/agent/tests
 uv run --locked --package agent ruff format --check backend/agent/src backend/agent/tests
 ```
 
+Если Windows сообщает `PermissionError` для `%TEMP%\pytest-of-<user>`, используйте
+новый временный каталог для каждого запуска. Это обходит недоступный общий каталог
+pytest без изменения его прав или удаления чужих файлов. В PowerShell из корня проекта:
+
+```powershell
+New-Item -ItemType Directory -Path .pytest-tmp -Force | Out-Null
+$testTemp = Join-Path (Get-Location).Path ('.pytest-tmp/' + [guid]::NewGuid().ToString('N'))
+uv run --locked --package agent pytest backend/agent/tests openapi_parser_project/tests -q --basetemp $testTemp
+```
+
+Если uv задан переменной с путём к исполняемому файлу, замените `uv` на `& $uv`.
+Временные файлы остаются в `.pytest-tmp/` для диагностики и исключены из Git.
+Не указывайте в `--basetemp` каталог с нужными файлами: pytest очищает его перед запуском.
+
 Интеграционные тесты запускают установленный CLI, настоящий LangChain-цикл и
 OpenAI-клиент против локального сценарного HTTP-сервера. Проверяется выбор tool,
 передача его результата обратно модели, контракт из файла/URL, JSON и артефакты.
