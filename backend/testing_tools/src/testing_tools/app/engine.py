@@ -16,8 +16,17 @@ from testing_tools.api.schemas import (
     ToolResult,
     ToolState,
 )
+from testing_tools.app.archive import RunArchive
+from testing_tools.app.report import render
 from testing_tools.app.settings import Settings, ToolMode
-from testing_tools.app.store import RESULT_TYPES, Artifact, RunRecord, ToolRun, utcnow
+from testing_tools.app.store import (
+    REPORT_ARTIFACT,
+    RESULT_TYPES,
+    Artifact,
+    RunRecord,
+    ToolRun,
+    utcnow,
+)
 from testing_tools.app.tools import ToolContext, ToolError, ToolRunner, default_runners
 
 PROBE_ATTEMPTS = 3
@@ -34,10 +43,14 @@ class Engine:
     """Walks a run through its lifecycle, handing each tool to its runner."""
 
     def __init__(
-        self, settings: Settings, runners: Mapping[ToolName, ToolRunner] | None = None
+        self,
+        settings: Settings,
+        runners: Mapping[ToolName, ToolRunner] | None = None,
+        archive: RunArchive | None = None,
     ) -> None:
         self._settings = settings
         self._runners = runners if runners is not None else default_runners(settings)
+        self._archive = archive
         self._probe_target = settings.tool_mode == ToolMode.REAL
 
     def start(self, record: RunRecord) -> None:
@@ -47,6 +60,7 @@ class Engine:
         # A task cancelled before its first step never runs its own cleanup.
         if record.state == RunState.QUEUED:
             _finish_cancelled(record)
+            self._finalize(record)
         if record.task is not None:
             record.task.cancel()
 
@@ -73,6 +87,18 @@ class Engine:
             raise
         else:
             _finish(record, RunState.COMPLETED)
+        finally:
+            self._finalize(record)
+
+    def _finalize(self, record: RunRecord) -> None:
+        """Attach the Markdown report and save the run; never fails the run."""
+        try:
+            content = render(record.result_view()).encode()
+            record.artifacts[REPORT_ARTIFACT] = Artifact("text/markdown", content)
+            if self._archive is not None:
+                self._archive.save(record)
+        except Exception:
+            log.exception("Run %s: saving results failed", record.run_id)
 
     async def _run_tool(self, record: RunRecord, tool: ToolRun) -> None:
         tool.state = ToolState.RUNNING

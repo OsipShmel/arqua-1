@@ -1,4 +1,5 @@
 import asyncio
+from pathlib import Path
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,6 +7,7 @@ import httpx2
 from fastapi import FastAPI
 
 from testing_tools.api.schemas import HealthResponse, HealthState, ToolName
+from testing_tools.app.archive import RunArchive
 from testing_tools.app.engine import Engine
 from testing_tools.app.errors import install_error_handlers
 from testing_tools.app.routes import router
@@ -31,8 +33,15 @@ def create_app(
 
     app = FastAPI(title="testing_tools", version=settings.version, lifespan=lifespan)
     app.state.settings = settings
-    app.state.store = RunStore()
-    app.state.engine = Engine(settings)
+    archive = (
+        RunArchive(Path(settings.results_dir), settings.api_prefix)
+        if settings.results_dir
+        else None
+    )
+    app.state.store = RunStore(
+        fallback=archive.load if archive else None, max_finished=settings.max_runs_in_memory
+    )
+    app.state.engine = Engine(settings, archive=archive)
     install_error_handlers(app)
     app.include_router(router, prefix=settings.api_prefix)
 

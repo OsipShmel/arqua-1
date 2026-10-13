@@ -14,6 +14,7 @@ from testing_tools.api.schemas import (
 )
 from testing_tools.api.schemas import TestOutcome as Outcome
 from testing_tools.app.contract import LoadedContract
+from testing_tools.app.settings import Settings
 from testing_tools.app.tools.base import ToolError
 from testing_tools.app.tools.mutation import MutationRunner
 from tool_helpers import make_ctx
@@ -196,3 +197,32 @@ async def test_baseline_timeout(
         await MutationRunner().run(config({"test_slow.py": slow}, per_mutant_timeout_s=1), ctx)
 
     assert exc.value.code == ErrorCode.TIMEOUT
+
+
+@pytest.mark.parametrize("isolate", [True, False])
+async def test_network_isolation(
+    tmp_path: Path, contract: LoadedContract, petstore_url: str, isolate: bool
+) -> None:
+    settings = Settings(tool_mode="real", isolate_test_network=isolate)
+    ctx, _ = make_ctx(tmp_path, contract, petstore_url, settings)
+    tests = (
+        "import os, httpx\n\n"
+        "def test_via_proxy():\n"
+        "    httpx.get(os.environ['ARQA_BASE_URL'] + '/pets').raise_for_status()\n\n"
+        "def test_direct():\n"
+        f"    httpx.get({petstore_url!r} + '/pets').raise_for_status()\n"
+    )
+
+    result = await MutationRunner().run(
+        config({"test_net.py": tests}, operators=["replace_status_code"], max_mutants=1), ctx
+    )
+
+    assert isinstance(result, MutationResult) and result.baseline is not None
+    outcomes = {t.node_id: t for t in result.baseline.tests}
+    assert outcomes["test_net.py::test_via_proxy"].outcome == Outcome.PASSED
+    direct = outcomes["test_net.py::test_direct"]
+    if isolate:
+        assert direct.outcome == Outcome.FAILED
+        assert "network access" in (direct.message or "")
+    else:
+        assert direct.outcome == Outcome.PASSED

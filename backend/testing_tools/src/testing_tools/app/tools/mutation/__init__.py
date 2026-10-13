@@ -40,7 +40,9 @@ class MutationRunner:
     async def run(self, config: ToolConfig, ctx: ToolContext) -> ToolResult:
         assert isinstance(config, MutationConfig)
         seed = config.seed if config.seed is not None else random.randrange(2**31)
-        suite = await Suite.prepare(config, ctx.work_dir, ctx.settings.uv_bin)
+        suite = await Suite.prepare(
+            config, ctx.work_dir, ctx.settings.uv_bin, ctx.settings.isolate_test_network
+        )
         ctx.set_progress(0.05)
 
         selected = select_operations(ctx.contract.operations, config.operations)

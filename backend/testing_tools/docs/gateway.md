@@ -1,4 +1,4 @@
-# testing_tools — устройство HTTP-шлюза (v0)
+# testing_tools — устройство HTTP-шлюза
 
 Документ для тех, кто впервые открывает код шлюза, — людей и LLM-агентов. Он описывает,
 как шлюз устроен внутри. Что шлюз обещает снаружи (эндпоинты, поля, коды ошибок),
@@ -7,14 +7,15 @@
 
 ## Коротко
 
-- FastAPI-приложение, которое реализует контракт `API.md` под префиксом `/api/v0`.
+- FastAPI-приложение, которое реализует контракт `API.md` под префиксом `/api/v1`.
 - HTTP-слой настоящий: валидация, ProblemDetail-ошибки, загрузка и разбор контракта,
   idempotency, 429, асинхронный жизненный цикл прогона, отмена, таймаут, артефакты.
 - `Engine` передаёт каждый инструмент его **раннеру** (`app/tools/`). В режиме
   `TT_TOOL_MODE=real` (по умолчанию) это настоящие Schemathesis, Microcks и мутационный
   раннер. В режиме `stub` все инструменты подменяет `StubRunner` + `stub_results.py`:
   инструмент «работает» `TT_TOOL_DELAY_S` секунд и возвращает правдоподобный результат.
-- Всё состояние хранится в памяти процесса и пропадает при рестарте.
+- Прогоны живут в памяти процесса; завершённые сохраняются на диск (`TT_RESULTS_DIR`)
+  и после рестарта читаются оттуда.
 - Настройки — `TT_*` из окружения или `.env`, шаблон — `.env.example`.
 - Python 3.14, `mypy --strict`, тесты на pytest. Комментарии в коде — на английском.
 
@@ -35,6 +36,9 @@
 | `app/store.py`        | `RunRecord`/`ToolRun` — изменяемое состояние прогона; `RunStore` — реестр в памяти; `*_view()` — сборка ответов API |
 | `app/engine.py`       | `Engine` — asyncio-задача на прогон: проверка target, смена состояний, вызов раннеров, ошибки инструментов, отмена, таймаут, артефакты |
 | `app/stub_results.py` | `build_result()` — заглушечный `ToolResult` для каждого инструмента        |
+| `app/metrics.py`      | `run_metrics()` — сводка `RunMetrics` по результатам всех инструментов     |
+| `app/report.py`       | `render()` — Markdown-отчёт по `RunResult`                                 |
+| `app/archive.py`      | `RunArchive` — сохранение завершённых прогонов на диск и чтение обратно; `masked_request()` |
 | `app/tools/__init__.py` | `default_runners(settings)` — раннер на каждый `ToolName` по `tool_mode`  |
 | `app/tools/base.py`   | `ToolRunner` (протокол), `ToolContext` (что раннер получает от движка), `ToolError` |
 | `app/tools/common.py` | общее для раннеров: `OperationIndex` (путь → операция), `Observations` + `build_coverage`, маскирование, curl, `filtered_document`, `resolve` для `$ref` |
@@ -42,7 +46,7 @@
 | `app/tools/stub.py`   | `StubRunner` — обёртка над `build_result()` с задержкой                     |
 | `app/tools/schemathesis.py` | `SchemathesisRunner` — `st run` подпроцессом, разбор JSON/NDJSON-отчётов |
 | `app/tools/microcks.py` | `MicrocksRunner` — клиент REST API Microcks                               |
-| `app/tools/mutation/` | `MutationRunner`: `mutants.py` (генерация и применение), `proxy.py` (мутирующий прокси), `suite.py` (набор тестов, окружение, pytest), `arqa_report_plugin.py` (pytest-плагин отчёта) |
+| `app/tools/mutation/` | `MutationRunner`: `mutants.py` (генерация и применение), `proxy.py` (мутирующий прокси), `suite.py` (набор тестов, окружение, pytest), `arqa_report_plugin.py` (pytest-плагин отчёта), `arqa_network_guard.py` (pytest-плагин сетевой изоляции) |
 
 Зависимости между модулями идут сверху вниз: `routes` → `validation`/`contract`/`store`/`engine`;
 `engine` → `store`/`tools`; `tools` → `contract`/`settings`/`store`/`stub_results`;
@@ -138,8 +142,26 @@
 - Ответы API собираются только через `*_view()`: `created_view`, `status_view`, `result_view`.
   Если инструмент не дал результата (отменён, пропущен, прерван), `ToolRun.result_view()`
   возвращает пустой `ToolResult` нужного типа с текущим `state`.
-- `RunStore` хранит `dict[UUID, RunRecord]` и `dict[idempotency_key, UUID]`, без TTL и
-  без блокировок: всё выполняется в одном event loop.
+- `RunStore` хранит `dict[UUID, RunRecord]` и `dict[idempotency_key, UUID]`, без
+  блокировок: всё выполняется в одном event loop. Завершённых прогонов в памяти не больше
+  `TT_MAX_RUNS_IN_MEMORY`, самые старые вытесняются вместе с их idempotency-ключами.
+  Прогон, которого нет в памяти, `get()` ищет через `fallback` — `RunArchive.load`.
+- `result_view()` добавляет `metrics` (`run_metrics`) и `report` (ссылка на артефакт
+  `run-report.md`, если он уже есть). У прогона, прочитанного с диска, `archived_result`
+  отдаётся как есть.
+
+## Результаты на диске (`app/archive.py`, `app/report.py`)
+
+- После завершения прогона (любого: `completed`, `failed`, `timed_out`, `cancelled`)
+  движок вызывает `_finalize`: рендерит Markdown-отчёт в артефакт `run-report.md` и, если
+  задан `TT_RESULTS_DIR`, сохраняет прогон через `RunArchive.save`. Ошибка сохранения
+  пишется в лог и не меняет состояние прогона.
+- Каталог прогона: `<YYYYmmddTHHMMSSZ>_<run_id>/` с `result.json`, `report.md`,
+  `request.json` (значения всех заголовков из запроса заменены на `***`), `artifacts/`
+  и `artifacts.json` (`{name: media_type}`).
+- `RunArchive.load` собирает из каталога `RunRecord` с `archived_result`; `contract`
+  у такого прогона — только `ContractInfo` без операций. Idempotency-ключи на диск не
+  сохраняются.
 
 ## Движок (`app/engine.py`)
 
@@ -229,7 +251,10 @@
    применяет активного мутанта к ответам с его операцией и ключом ответа.
 4. pytest запускается с плагином `arqa_report_plugin` (реальные node id и исходы),
    `--continue-on-collection-errors` и `-p no:cacheprovider`; переменные `TT_*` из
-   окружения убираются.
+   окружения убираются. При `TT_ISOLATE_TEST_NETWORK=true` подключается ещё
+   `arqa_network_guard`: он подменяет `socket.connect`/`connect_ex` и разрешает TCP только
+   к loopback-порту прокси (`ARQA_ALLOWED_PORTS`). Это защита от случайных обращений, не
+   песочница: процесс, запущенный тестом, плагин не наследует.
 5. Baseline. Не уложился в `per_mutant_timeout_s` — `ToolError(timeout)`; pytest не смог
    работать (коды 2–4, нет отчёта) — `ToolError(test_suite_invalid)`.
 6. Для каждого мутанта:
@@ -286,6 +311,7 @@
 | `test_tool_schemathesis.py` | настоящий `st run` против `buggy_petstore`, маппинг конфига на флаги CLI |
 | `test_tool_microcks.py`    | `MicrocksRunner` против фейкового REST API Microcks (`MockTransport`) |
 | `test_tool_mutation.py`    | настоящие прокси и pytest против `buggy_petstore`: baseline, мутанты, git-набор, ошибки набора |
+| `test_results.py`          | `metrics`, Markdown-отчёт, сохранение на диск и чтение после «перезапуска», вытеснение из памяти, маскирование запроса |
 | `test_tool_engine_real.py` | движок с подставными раннерами (`ToolError`, падение, проверка target, временные каталоги), `run_process` |
 | `petstore.py`              | эталонный контракт (4 операции) и `inline_contract()`, общие для всех тестов |
 | `test_settings.py`, `test_health.py`, `test_tools_endpoint.py`, `test_entrypoint.py` | настройки, `/health`, `/tools`, `main()` |
@@ -310,7 +336,7 @@
   соответствующем порядку из `API.md`.
 - **Новая настройка**: поле в `Settings` и строка в `.env.example` (иначе упадёт тест),
   строка в таблице README.
-- **Сменить префикс** (`v0` → `v1`): `TT_API_PREFIX` или значение по умолчанию в `Settings`;
+- **Сменить префикс**: `TT_API_PREFIX` или значение по умолчанию в `Settings`;
   `links` и `Location` строятся от префикса.
 - **Новый инструмент**: конфиг и результат в `schemas.py` и `API.md`, раннер в
   `app/tools/` (протокол `ToolRunner`), строка в `default_runners()`, заглушка в
@@ -321,10 +347,10 @@
 
 ## Отличия от `API.md`
 
-- Префикс `/api/v0` вместо `/api/v1`.
 - Неизвестный маршрут или метод — стандартный ответ FastAPI, не ProblemDetail.
 - Невалидный `path_regex` → `422 validation_error` (в доке не описано).
-- Нет 24-часового хранения: прогоны и idempotency-ключи живут, пока жив процесс.
+- Idempotency-ключи живут только в памяти: после перезапуска или вытеснения прогона
+  повторный `POST` с тем же ключом создаст новый прогон.
 - В `Finding.request.headers` и `reproduce` маскируются заголовки из `target.headers`,
   а также `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`. Сырые
   артефакты Schemathesis маскирует сам (`--output-sanitize` включён по умолчанию);

@@ -33,7 +33,8 @@ uv run python -m testing_tools.api.schemas > schemas.json
 - Прогоны **асинхронные**: `POST` сразу возвращает `202`, дальше агент поллит статус.
 - Значения заголовков из `target.headers`, `contract.headers`,
   `operations_headers` маскируются в логах, артефактах и `Finding.request.headers`.
-- Состояние прогонов и артефакты хранятся минимум 24 часа.
+- Завершённые прогоны сохраняются на диск (`TT_RESULTS_DIR`) и доступны по тем же URL
+  после перезапуска сервиса. Без `TT_RESULTS_DIR` прогоны живут только в памяти процесса.
 
 ## Эндпоинты
 
@@ -237,6 +238,10 @@ Microcks. В находках Microcks `request.url` — шаблон пути (
   или мутация ни разу не применилась (например, необязательного поля не было в ответе).
   Если на baseline не прошёл ни один тест, все мутанты — `no_coverage`.
 - Ошибки сбора тестов не останавливают pytest (`--continue-on-collection-errors`).
+- Сетевая изоляция (`TT_ISOLATE_TEST_NETWORK=true`, по умолчанию): тесты могут открывать
+  TCP-соединения только к адресу из `base_url_env`. Любое другое соединение падает с
+  `PermissionError`, и тест получает `failed`/`error`. Тесты должны ходить в сервис только
+  через `base_url_env`.
 - Если baseline не уложился в `per_mutant_timeout_s`, инструмент завершается с `error`
   (`timeout`); если pytest не смог запустить набор (например, неизвестный флаг в
   `pytest_args`) — `error` с `test_suite_invalid` и хвостом вывода в `details.output_tail`.
@@ -343,7 +348,45 @@ Idempotency-Key: 2f0c1a1e-run-17
 | `contract`        | `ContractInfo \| null`   | `title`, `version`, `openapi_version`, `operations_total`, `sha256` |
 | `target_base_url` | str                      |                                              |
 | `tools`           | `list[ToolResult]`       | дискриминатор `tool`, порядок как в запросе  |
+| `metrics`         | `RunMetrics`             | сводка метрик по всем инструментам, см. ниже |
+| `report`          | `ArtifactRef \| null`    | Markdown-отчёт по прогону (`run-report.md`)  |
 | `error`           | `ErrorInfo \| null`      | при `failed` / `timed_out`                   |
+
+**`RunMetrics`** — одна плоская сводка для агента. Поле `null`, если в прогоне не было
+инструмента, который даёт эту метрику.
+
+| Поле                   | Откуда                                                                 |
+|------------------------|------------------------------------------------------------------------|
+| `contract_coverage`    | доля операций, которые протестировал хотя бы один из `schemathesis`/`microcks` |
+| `status_code_coverage` | доля задокументированных ответов, которые наблюдал хотя бы один из них |
+| `faults`               | `findings_total`, `by_severity`, `by_tool`, `operations_with_findings` по находкам `schemathesis`/`microcks` |
+| `test_suite_size`      | `mutation.baseline.tests_total`                                        |
+| `runnability`          | `mutation.baseline.runnability`                                        |
+| `mutation_score`       | `mutation.summary.mutation_score`                                      |
+| `duration_s`           | `{tool: секунды}` для каждого отработавшего инструмента                |
+
+```json
+"metrics": {
+  "contract_coverage": 1.0,
+  "status_code_coverage": 0.8,
+  "faults": {
+    "findings_total": 10,
+    "by_severity": {"critical": 2, "high": 8},
+    "by_tool": {"schemathesis": 10},
+    "operations_with_findings": 4
+  },
+  "test_suite_size": 40,
+  "runnability": 0.9,
+  "mutation_score": 0.7333,
+  "duration_s": {"schemathesis": 99.2, "mutation": 612.0}
+}
+```
+
+Один дефект сервиса часто даёт несколько находок, поэтому `findings_total` — не число
+дефектов. Fault Detection Rate считается по списку известных дефектов (см. `demo/README.md`).
+
+Отчёт `report` — Markdown для человека: метрики, состояние инструментов, находки,
+покрытие по операциям, итоги тестов агента и выжившие мутанты. Скачивается по `report.url`.
 
 Общие поля любого `ToolResult`: `state`, `tool_version`, `started_at`,
 `finished_at`, `duration_s`, `error`, `artifacts: list[ArtifactRef]`.

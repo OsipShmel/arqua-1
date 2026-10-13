@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from testing_tools.api.schemas import (
     ErrorCode,
@@ -20,6 +21,7 @@ from testing_tools.app.tools.base import ToolError
 from testing_tools.app.tools.process import ProcessResult, run_process
 
 PLUGIN = Path(__file__).with_name("arqa_report_plugin.py")
+NETWORK_GUARD = Path(__file__).with_name("arqa_network_guard.py")
 BASE_REQUIREMENTS = ("pytest", "httpx")
 GIT_TIMEOUT_S = 300.0
 INSTALL_TIMEOUT_S = 600.0
@@ -45,19 +47,23 @@ class SuiteRun:
 
 
 class Suite:
-    def __init__(self, root: Path, python: str, work_dir: Path) -> None:
+    def __init__(self, root: Path, python: str, work_dir: Path, isolate_network: bool) -> None:
         self.root = root
         self._python = python
         self._work_dir = work_dir
+        self._isolate_network = isolate_network
         self._plugin_dir = work_dir / "plugin"
         self._plugin_dir.mkdir(exist_ok=True)
-        shutil.copy(PLUGIN, self._plugin_dir / PLUGIN.name)
+        for plugin in (PLUGIN, NETWORK_GUARD):
+            shutil.copy(plugin, self._plugin_dir / plugin.name)
 
     @classmethod
-    async def prepare(cls, config: MutationConfig, work_dir: Path, uv_bin: str) -> "Suite":
+    async def prepare(
+        cls, config: MutationConfig, work_dir: Path, uv_bin: str, isolate_network: bool
+    ) -> "Suite":
         root = await _materialize(config, work_dir / "suite")
         python = await _python(config.requirements, work_dir, uv_bin)
-        return cls(root, python, work_dir)
+        return cls(root, python, work_dir, isolate_network)
 
     async def run(
         self,
@@ -77,6 +83,8 @@ class Suite:
             "--continue-on-collection-errors",
             "-q", "--rootdir", str(self.root),
         ]  # fmt: skip
+        if self._isolate_network:
+            args += ["-p", NETWORK_GUARD.stem]
         if junit is not None:
             args += ["--junitxml", str(junit)]
         for node_id in deselect:
@@ -90,6 +98,7 @@ class Suite:
                 "ARQA_REPORT_PATH": str(report),
                 "PYTHONPATH": os.pathsep.join([str(self._plugin_dir), str(self.root)]),
                 "PYTHONDONTWRITEBYTECODE": "1",
+                "ARQA_ALLOWED_PORTS": str(urlsplit(base_url).port or ""),
             }
         )
         process = await run_process(args, cwd=self.root, env=env, timeout_s=timeout_s)

@@ -21,7 +21,7 @@ from testing_tools.app.store import RunRecord
 
 pytestmark = pytest.mark.anyio
 
-PREFIX = "/api/v0"
+PREFIX = "/api/v1"
 
 
 def make_record(*tools: dict[str, Any]) -> RunRecord:
@@ -50,7 +50,11 @@ async def test_run_completes_with_results_in_request_order() -> None:
     assert all(t.progress == 1.0 for t in record.tools)
     assert isinstance(record.tools[0].result, MicrocksResult)
     assert isinstance(record.tools[1].result, SchemathesisResult)
-    assert sorted(record.artifacts) == ["microcks-stub.json", "schemathesis-stub.json"]
+    assert sorted(record.artifacts) == [
+        "microcks-stub.json",
+        "run-report.md",
+        "schemathesis-stub.json",
+    ]
 
 
 async def test_schemathesis_stub_coverage_follows_contract_and_filter() -> None:

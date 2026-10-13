@@ -6,7 +6,7 @@ from testing_tools.app.settings import Settings
 
 
 def test_tools_lists_every_tool_with_its_config_schema(client: TestClient) -> None:
-    r = client.get("/api/v0/tools")
+    r = client.get("/api/v1/tools")
 
     assert r.status_code == 200
     tools = r.json()
@@ -21,13 +21,13 @@ def test_tools_lists_every_tool_with_its_config_schema(client: TestClient) -> No
 def test_unavailable_tool_has_no_version() -> None:
     settings = Settings(unavailable_tools=frozenset({ToolName.MUTATION}))
     with TestClient(create_app(settings)) as client:
-        mutation = client.get("/api/v0/tools").json()[2]
+        mutation = client.get("/api/v1/tools").json()[2]
 
     assert mutation["available"] is False
     assert mutation["version"] is None
 
 
 def test_tools_follow_configured_prefix() -> None:
-    with TestClient(create_app(Settings(api_prefix="/api/v1"))) as client:
-        assert client.get("/api/v1/tools").status_code == 200
-        assert client.get("/api/v0/tools").status_code == 404
+    with TestClient(create_app(Settings(api_prefix="/api/v2"))) as client:
+        assert client.get("/api/v2/tools").status_code == 200
+        assert client.get("/api/v1/tools").status_code == 404

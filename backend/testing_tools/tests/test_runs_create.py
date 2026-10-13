@@ -9,7 +9,7 @@ from testing_tools.api.schemas import ToolName
 from testing_tools.app.main import create_app
 from testing_tools.app.settings import Settings
 
-RUNS = "/api/v0/runs"
+RUNS = "/api/v1/runs"
 
 
 def run_request(**overrides: Any) -> dict[str, Any]:

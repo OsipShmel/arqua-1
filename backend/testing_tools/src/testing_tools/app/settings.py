@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     host: str = "127.0.0.1"
     port: int = Field(default=8000, ge=1, le=65535)
-    api_prefix: str = "/api/v0"
+    api_prefix: str = "/api/v1"
     tool_mode: ToolMode = ToolMode.REAL
     tool_delay_s: float = Field(default=1.0, ge=0)
     """Simulated duration of each stub tool (`tool_mode=stub` only)."""
@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     """Keycloak service account for Microcks; empty = no auth (dev / uber image)."""
     microcks_client_secret: str = ""
     microcks_poll_interval_s: float = Field(default=1.0, gt=0)
+    results_dir: str = "results"
+    """Finished runs are saved here (JSON + Markdown); empty = don't save."""
+    max_runs_in_memory: int = Field(default=500, ge=1)
+    """Finished runs kept in memory; older ones are served from `results_dir`."""
+    isolate_test_network: bool = True
+    """Agent tests may only connect to the service under test (through the proxy)."""
     uv_bin: str = "uv"
     """Used to build a venv for mutation test suites that declare `requirements`."""
 

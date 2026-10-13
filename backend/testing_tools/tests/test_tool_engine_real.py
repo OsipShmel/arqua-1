@@ -33,7 +33,7 @@ def make_record(base_url: str, *tools: dict[str, Any]) -> RunRecord:
     request = RunCreateRequest.model_validate(
         {"contract": inline_contract(), "target": {"base_url": base_url}, "tools": list(tools)}
     )
-    return RunRecord.new(request, parse_contract(PETSTORE_JSON), "/api/v0")
+    return RunRecord.new(request, parse_contract(PETSTORE_JSON), "/api/v1")
 
 
 class Scripted:

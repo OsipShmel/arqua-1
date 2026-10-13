@@ -1,1 +1,1 @@
-"""testing_tools v0 gateway: real HTTP contract, stub tool engine."""
+"""testing_tools gateway: HTTP API over the tool runners."""

@@ -12,21 +12,21 @@ def test_settings_defaults() -> None:
     s = Settings()
 
     assert (s.host, s.port) == ("127.0.0.1", 8000)
-    assert s.api_prefix == "/api/v0"
+    assert s.api_prefix == "/api/v1"
     assert s.tool_delay_s == 1.0
     assert s.max_active_runs == 16
     assert s.unavailable_tools == frozenset()
 
 
 def test_settings_from_process_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TT_API_PREFIX", "/api/v1")
+    monkeypatch.setenv("TT_API_PREFIX", "/api/v2")
     monkeypatch.setenv("TT_TOOL_DELAY_S", "0.25")
     monkeypatch.setenv("TT_MAX_ACTIVE_RUNS", "3")
     monkeypatch.setenv("TT_UNAVAILABLE_TOOLS", "microcks, mutation")
 
     s = Settings()
 
-    assert s.api_prefix == "/api/v1"
+    assert s.api_prefix == "/api/v2"
     assert s.tool_delay_s == 0.25
     assert s.max_active_runs == 3
     assert s.unavailable_tools == frozenset({ToolName.MICROCKS, ToolName.MUTATION})

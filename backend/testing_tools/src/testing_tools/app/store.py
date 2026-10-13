@@ -1,10 +1,12 @@
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from testing_tools.api.schemas import (
     TERMINAL_RUN_STATES,
+    ArtifactRef,
     ErrorInfo,
     MicrocksResult,
     MutationResult,
@@ -22,6 +24,9 @@ from testing_tools.api.schemas import (
     ToolState,
 )
 from testing_tools.app.contract import LoadedContract
+from testing_tools.app.metrics import run_metrics
+
+REPORT_ARTIFACT = "run-report.md"
 
 RESULT_TYPES: dict[ToolName, type[SchemathesisResult | MicrocksResult | MutationResult]] = {
     ToolName.SCHEMATHESIS: SchemathesisResult,
@@ -86,6 +91,8 @@ class RunRecord:
     tools: list[ToolRun] = field(default_factory=list)
     artifacts: dict[str, Artifact] = field(default_factory=dict)
     task: asyncio.Task[None] | None = None
+    archived_result: RunResult | None = None
+    """Set for runs read back from disk: their result is served as saved."""
 
     @classmethod
     def new(
@@ -124,6 +131,10 @@ class RunRecord:
         )
 
     def result_view(self) -> RunResult:
+        if self.archived_result is not None:
+            return self.archived_result
+        results = [tool.result_view() for tool in self.tools]
+        report = self.artifacts.get(REPORT_ARTIFACT)
         duration = (
             (self.finished_at - self.started_at).total_seconds()
             if self.started_at and self.finished_at
@@ -139,28 +150,62 @@ class RunRecord:
             labels=self.request.labels,
             contract=self.contract.info,
             target_base_url=str(self.request.target.base_url),
-            tools=[tool.result_view() for tool in self.tools],
+            tools=results,
+            metrics=run_metrics(self.contract, results),
+            report=ArtifactRef(
+                name=REPORT_ARTIFACT,
+                media_type=report.media_type,
+                size_bytes=len(report.content),
+                url=f"{self.links.self}/artifacts/{REPORT_ARTIFACT}",
+            )
+            if report
+            else None,
             error=self.error,
         )
 
 
 class RunStore:
-    """In-memory run registry; lives as long as the process."""
+    """In-memory run registry.
 
-    def __init__(self) -> None:
+    Keeps at most `max_finished` finished runs in memory (oldest go first); `fallback`
+    (the on-disk archive) is asked for runs that aren't in memory.
+    """
+
+    def __init__(
+        self,
+        fallback: Callable[[UUID], RunRecord | None] | None = None,
+        max_finished: int | None = None,
+    ) -> None:
         self._runs: dict[UUID, RunRecord] = {}
         self._idempotency: dict[str, UUID] = {}
+        self._fallback = fallback
+        self._max_finished = max_finished
 
     def add(self, record: RunRecord, idempotency_key: str | None = None) -> None:
+        self._evict()
         self._runs[record.run_id] = record
         if idempotency_key is not None:
             self._idempotency[idempotency_key] = record.run_id
 
     def get(self, run_id: str | UUID) -> RunRecord | None:
         try:
-            return self._runs.get(UUID(str(run_id)))
+            uuid = UUID(str(run_id))
         except ValueError:
             return None
+        record = self._runs.get(uuid)
+        if record is None and self._fallback is not None:
+            record = self._fallback(uuid)
+        return record
+
+    def _evict(self) -> None:
+        if self._max_finished is None:
+            return
+        finished = [r for r in self._runs.values() if r.finished]
+        finished.sort(key=lambda r: r.finished_at or r.created_at)
+        for record in finished[: max(0, len(finished) - self._max_finished + 1)]:
+            del self._runs[record.run_id]
+        live = set(self._runs)
+        self._idempotency = {k: v for k, v in self._idempotency.items() if v in live}
 
     def by_idempotency_key(self, key: str) -> RunRecord | None:
         run_id = self._idempotency.get(key)

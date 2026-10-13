@@ -627,6 +627,41 @@ ToolResult = Annotated[
 ]
 
 
+class FaultMetrics(Schema):
+    """Находки black-box инструментов (schemathesis, microcks) — Fault Detection."""
+
+    findings_total: int
+    by_severity: dict[Severity, int]
+    by_tool: dict[ToolName, int]
+    operations_with_findings: int = Field(description="Операции, где найдена хотя бы одна проблема.")
+
+
+class RunMetrics(Schema):
+    """Сводка метрик ТЗ по прогону. null — в прогоне не было инструмента, который её даёт."""
+
+    contract_coverage: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Доля операций контракта, которые протестировал хотя бы один инструмент.",
+    )
+    status_code_coverage: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Доля задокументированных ответов, которые наблюдал хотя бы один инструмент.",
+    )
+    faults: FaultMetrics | None = None
+    test_suite_size: int | None = Field(
+        default=None, description="Тестов в наборе агента (mutation.baseline.tests_total)."
+    )
+    runnability: float | None = Field(default=None, ge=0, le=1)
+    mutation_score: float | None = Field(default=None, ge=0, le=1)
+    duration_s: dict[ToolName, float] = Field(
+        default_factory=dict, description="Время работы каждого инструмента."
+    )
+
+
 class RunResult(Schema):
     run_id: UUID
     state: RunState
@@ -640,6 +675,10 @@ class RunResult(Schema):
     )
     target_base_url: str
     tools: list[ToolResult]
+    metrics: RunMetrics = Field(default_factory=RunMetrics)
+    report: ArtifactRef | None = Field(
+        default=None, description="Markdown-отчёт по прогону; есть у завершённых прогонов."
+    )
     error: ErrorInfo | None = None
 
 
