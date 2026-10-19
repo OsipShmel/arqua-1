@@ -1,0 +1,213 @@
+{
+  "$defs": {
+    "ResultFile": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "Relative artifact path; confinement and Windows filename rules are checked before writing",
+          "title": "Path",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 14000000,
+          "title": "Content",
+          "type": "string"
+        },
+        "kind": {
+          "default": "other",
+          "enum": [
+            "pytest",
+            "junit",
+            "log",
+            "report",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "encoding": {
+          "default": "utf-8",
+          "enum": [
+            "utf-8",
+            "base64"
+          ],
+          "title": "Encoding",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "title": "ResultFile",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "success"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "output": {
+            "not": {
+              "type": "null"
+            }
+          }
+        },
+        "required": [
+          "output"
+        ]
+      }
+    }
+  ],
+  "properties": {
+    "result_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Result Version",
+      "type": "integer"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "output": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "items": {},
+          "type": "array"
+        },
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Output"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error"
+    },
+    "error_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Error Type"
+    },
+    "tool_mode": {
+      "default": "unknown",
+      "enum": [
+        "demo",
+        "external",
+        "real",
+        "unknown"
+      ],
+      "title": "Tool Mode",
+      "type": "string"
+    },
+    "metrics": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Metrics"
+    },
+    "execution": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Execution"
+    },
+    "tool_runs": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Tool Runs",
+      "type": "array"
+    },
+    "tool_artifacts": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Tool Artifacts",
+      "type": "array"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/ResultFile"
+      },
+      "maxItems": 200,
+      "title": "Files",
+      "type": "array"
+    },
+    "runtime": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Runtime"
+    }
+  },
+  "required": [
+    "status"
+  ],
+  "title": "AgentResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

@@ -4,14 +4,16 @@
 в [корневом README](../../README.md). Этот файл описывает пакет `agent` и его CLI.
 
 CLI принимает OpenAPI-контракт из локального JSON/YAML-файла или HTTP(S) URL,
-передаёт компактный JSON исходного документа агенту и сохраняет его ответ в JSON и Markdown.
+готовит summary по операциям, опционально добавляет Python/FastAPI-контекст и сохраняет
+результат агента, отчёты, manifest и журнал. Полный контракт в LLM не передаётся.
 Агент самостоятельно выбирает и вызывает tools; CLI к tools-сервису не обращается.
 
-**Текущее состояние ветки:** tools демонстрационные. Реальные проверки, фаззинг
-и генерация pytest-кода ещё не подключены. Отчёт явно содержит `tool_mode: "demo"`,
-`metrics: null` и пустой список `generated_tests`. Статус `success` означает успешный
-вызов агента, а не прохождение тестов. Параметры для исходников, self-repair и выбора
-реальных инструментов появятся после поддержки этих возможностей агентом.
+**Текущее состояние:** без `--tools-url` используются демо-tools. При подключении
+отдельно запущенного HTTP-сервиса из `develop` агент вызывает Schemathesis/Microcks.
+Статус `success` относится к вызову агента; результаты проверок — в `execution`.
+Генератора pytest/self-repair ещё нет; CLI готов сохранять возвращённые генератором файлы.
+Подробный интерфейс: [INTEGRATION.md](docs/INTEGRATION.md),
+машиночитаемый контракт: [AgentResult](docs/agent-result.schema.json).
 
 ## Установка
 
@@ -36,18 +38,19 @@ CLI передаёт задание в `runner.invoke_agent`, который з�
 `python -m agent.worker`. Worker вызывает функцию агентной части:
 
 ```python
-run_qa_agent(task: str, *, max_steps: int = 25) -> dict
+run_qa_agent(task: str, *, max_steps: int = 25, telemetry=None, gateway=None) -> dict
 ```
 
 Она создаёт LangChain-агент и запускает цикл с `recursion_limit=max_steps`.
 Успешный результат содержит `status: "success"`, `output` с содержимым последнего
-сообщения модели и `tool_mode: "demo"`. Исключения функции перехватывает worker,
+сообщения модели, runtime и режим tools. Опциональные telemetry/gateway передаёт worker.
+Исключения функции перехватывает worker,
 возвращая CLI `status: "error"`, `error` и `error_type`.
 
 Функция управляет моделью и tools; CLI управляет вводом, временем запуска и файлами
 отчётов. Прямой вызов `run_qa_agent` из Python не получает таймаут отдельного процесса:
-он реализован в runner. Для реальных результатов генерации интерфейс функции и
-сохранение артефактов в CLI необходимо будет расширить совместно.
+он реализован в runner. Для генератора используется AgentResult v1 с необязательным
+списком files; произвольные пути из текста LLM не загружаются.
 
 ## Настройки модели
 
@@ -91,6 +94,7 @@ tool calling. Предупреждение о демонстрационных t
 uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8080
 uv run --locked arqa-testgen generate http://localhost:8080/openapi.json --base-url http://localhost:8080 --output ./runs --format json
 uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8080 --agent-timeout 120 --max-steps 15
+uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8080 --source-dir ./service --tools-url http://localhost:8000/api/v1 --tools schemathesis
 ```
 
 Для путей с пробелами используйте кавычки. Альтернативный запуск установленного
@@ -105,16 +109,21 @@ uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8
 | `--contract-timeout` | Положительный таймаут загрузки контракта, по умолчанию 10 секунд |
 | `--agent-timeout` | Максимальное время процесса агента, по умолчанию 300 секунд |
 | `--max-steps` | Предел шагов графа LangGraph, по умолчанию 25 |
+| `--source-dir` | Дополнительный каталог Python/FastAPI-исходников |
+| `--source-max-chars` | Бюджет JSON-списка исходных фрагментов, по умолчанию 24000 |
+| `--summary-max-chars` | Предел summary в символах, по умолчанию 100000 |
+| `--tools-url` | Базовый URL tools API с `/api/v1`; клиент работает в агенте |
+| `--tools` | Разрешённые schemathesis/microcks; без списка при gateway — schemathesis |
+| `--tools-timeout` | Срок удалённого прогона, по умолчанию 120 секунд |
 | `--help`, `--version` | Справка и версия, работают без ключей модели |
 
-CLI использует командный `OpenAPIParser` для базовой проверки и метаданных,
-а агенту передаёт исходный документ как JSON без пробелов и дублирующего `raw`.
-Это сохраняет `multipleOf`, `const`, явные `null`, расширения, глобальную авторизацию,
-`securitySchemes` и все разделы `components`, на которые могут ссылаться `$ref`.
-Подготовка контекста не является полной проверкой документа по стандарту OpenAPI.
-URL загружается на машине, где запущен CLI. Контракт должен содержать хотя бы одну
-HTTP-операцию. `$ref` сохраняются вместе с их локальными определениями; внешние
-ссылки CLI не загружает автоматически.
+CLI использует командный parser для базовой проверки и метаданных, затем отдельный
+нормализатор строит summary с операциями, используемыми схемами, ограничениями,
+примерами и авторизацией. Локальные JSON Pointer ссылки разрешаются; рекурсивные
+схемы сохраняются в реестре. Неиспользуемые данные и произвольные vendor-расширения
+в LLM не копируются. Внешние документы и anchors пока не поддерживаются.
+URL загружается на машине CLI; требуется хотя бы одна HTTP-операция.
+Подготовка summary не является полной валидацией OpenAPI/JSON Schema.
 
 Этапы и диагностика выводятся в stderr. В режиме `--format json` stdout содержит
 ровно один JSON-документ в UTF-8, включая перенаправление в файл на Windows.
@@ -135,6 +144,13 @@ CLI запускает агент в отдельном процессе, пер
 runs/<UTC-time>-<ID>/
   report.json
   report.md
+  manifest.json
+  events.jsonl
+  contract-summary.json
+  runtime.json                 # При наличии телеметрии worker
+  source-context.json          # При --source-dir
+  agent_artifacts/             # Файлы из AgentResult
+  tool_artifacts/<tools-id>/   # Запрос, результат и файлы tools API
 ```
 
 JSON содержит статус вызова, времена, SHA-256 исходного контракта, количество

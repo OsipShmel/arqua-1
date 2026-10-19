@@ -40,6 +40,7 @@ def test_cli_preserves_json_stdout_and_saves_separate_reports(
         return {
             "status": "success",
             "output": [{"type": "text", "text": "Ответ агента"}],
+            "tool_mode": "demo",
         }
 
     monkeypatch.setattr(cli, "invoke_agent", fake_agent)
@@ -184,5 +185,83 @@ def test_limits_forwarded_and_recorded(arguments, monkeypatch, capsys):
     monkeypatch.setattr(cli, "invoke_agent", agent)
     assert cli.main(arguments + ["--agent-timeout", "7.5", "--max-steps", "3"]) == 0
     report = json.loads(capsys.readouterr().out)
-    assert received == {"timeout": 7.5, "max_steps": 3}
+    assert received["timeout"] == 7.5 and received["max_steps"] == 3
+    assert received["context"]["run_id"] == report["run_id"]
     assert report["limits"] == {"agent_timeout": 7.5, "max_steps": 3}
+
+
+def test_source_manifest_events_and_agent_files(
+    arguments, tmp_path, monkeypatch, capsys
+):
+    source = tmp_path / "service"
+    source.mkdir()
+    (source / "app.py").write_text("def calculate(x):\n    return x + 1\n")
+
+    def agent(task, **kwargs):
+        assert "calculate" in task and "source_context_json" in task
+        return {
+            "status": "success",
+            "output": "done",
+            "tool_mode": "real",
+            "metrics": {"tests_total": 1},
+            "execution": {"state": "passed"},
+            "files": [
+                {
+                    "path": "tests/test_calc.py",
+                    "kind": "pytest",
+                    "content": "def test_calc():\n    assert 1 == 1\n",
+                },
+                {"path": "junit.xml", "kind": "junit", "content": "<testsuites/>"},
+            ],
+        }
+
+    monkeypatch.setattr(cli, "invoke_agent", agent)
+    assert cli.main(arguments + ["--source-dir", str(source)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["schema_version"] == 2 and report["tool_mode"] == "real"
+    assert len(report["generated_tests"]) == 1
+    assert Path(report["generated_tests"][0]).is_file()
+    assert report["metrics"] == {"tests_total": 1}
+    manifest = json.loads(
+        Path(report["artifacts"]["manifest"]).read_text(encoding="utf-8")
+    )
+    assert manifest["source"]["files_total"] == 1
+    assert manifest["environment"]["packages"]["agent"] == "0.1.0"
+    events = [
+        json.loads(line)
+        for line in Path(report["artifacts"]["events"])
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert events[0]["event"] == "run.started" and events[-1]["event"] == "run.finished"
+    assert {e["run_id"] for e in events} == {report["run_id"]}
+
+
+def test_invalid_source_never_invokes_agent(arguments, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli, "invoke_agent", lambda *a, **k: pytest.fail("Agent must not run")
+    )
+    assert cli.main(arguments + ["--source-dir", "nonexistent-arqa-source"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "error" and report["source"] is None
+    assert Path(report["artifacts"]["manifest"]).exists()
+
+
+def test_tools_options_are_passed_only_to_agent(arguments, monkeypatch, capsys):
+    captured = {}
+
+    def agent(task, **kwargs):
+        captured.update(kwargs["context"]["gateway"])
+        assert '"paths"' not in task  # Raw contract is for deterministic tools only.
+        return {"status": "success", "output": "done", "tool_mode": "external"}
+
+    monkeypatch.setattr(cli, "invoke_agent", agent)
+    assert (
+        cli.main(
+            arguments
+            + ["--tools-url", "http://tools.test/api/v1", "--tools", "microcks"]
+        )
+        == 0
+    )
+    assert captured["tools"] == ["microcks"] and "paths" in captured["contract"]
+    assert json.loads(capsys.readouterr().out)["tool_mode"] == "external"

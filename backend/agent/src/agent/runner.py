@@ -7,7 +7,9 @@ import subprocess
 import sys
 
 
-def invoke_agent(task: str, *, timeout: float, max_steps: int) -> dict:
+def invoke_agent(
+    task: str, *, timeout: float, max_steps: int, context: dict | None = None
+) -> dict:
     # stdin keeps the contract out of process command lines and avoids their size
     # limits on Windows. The worker reserves stdout for its JSON result.
     with subprocess.Popen(
@@ -19,8 +21,11 @@ def invoke_agent(task: str, *, timeout: float, max_steps: int) -> dict:
         encoding="utf-8",
     ) as process:
         try:
+            request = {"task": task, "max_steps": max_steps}
+            if context is not None:
+                request["context"] = context
             output, _ = process.communicate(
-                json.dumps({"task": task, "max_steps": max_steps}, ensure_ascii=False),
+                json.dumps(request, ensure_ascii=False),
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:
