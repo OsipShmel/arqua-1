@@ -21,8 +21,13 @@ from typing import Any
 HERE = Path(__file__).parent
 SUITES = HERE / "sample_agent_tests"
 TEST_FILES = {"petstore": "test_pets.py", "orders": "test_orders.py"}
-# mutation first: Schemathesis fuzzes and changes service state, so it goes last
-TOOL_ORDER = ["mutation", "microcks", "schemathesis"]
+# mutation first: the fuzzers create and delete data, so they go last
+TOOL_ORDER = ["mutation", "microcks", "schemathesis", "evomaster"]
+CAUSES = {
+    "service_defect": "дефект сервиса",
+    "test_error": "ошибка теста",
+    "infrastructure": "инфраструктура",
+}
 
 
 def request_body(service: str, tools: list[str]) -> dict[str, Any]:
@@ -41,7 +46,10 @@ def request_body(service: str, tools: list[str]) -> dict[str, Any]:
         },
         "microcks": {"tool": "microcks"},
         "schemathesis": {"tool": "schemathesis", "max_examples": 50, "seed": 1},
-    }
+        # 308 "anonymous modifications" needs an auth model; the demo APIs have none
+        "evomaster": {"tool": "evomaster", "max_time_s": 60, "seed": 1,
+                      "disabled_oracle_codes": [308]},
+    }  # fmt: skip
     return {
         "contract": {"kind": "url", "url": f"{base}/openapi.yaml"},
         "target": {"base_url": base},
@@ -106,7 +114,10 @@ def main() -> None:
     print(f"  Contract Coverage, коды ответов: {pct(m['status_code_coverage'])}")
     if m["faults"]:
         print(f"  Находок black-box инструментов:  {m['faults']['findings_total']}")
-    print(f"  Test Suite Size:                 {m['test_suite_size'] if m['test_suite_size'] is not None else '—'}")
+    print(f"  Покрытие операций тестами агента: {pct(m['tests_contract_coverage'])}")
+    print(f"  Покрытие кодов тестами агента:   {pct(m['tests_status_code_coverage'])}")
+    size = m["test_suite_size"]
+    print(f"  Test Suite Size:                 {size if size is not None else '—'}")
     print(f"  Runnability:                     {pct(m['runnability'])}")
     print(f"  Mutation Score:                  {pct(m['mutation_score'])}")
 
@@ -120,11 +131,15 @@ def main() -> None:
             if line not in seen:
                 seen.add(line)
                 print(f"  [{f['severity']}] {line[:110]}")
+        if tool.get("summary") and tool["tool"] == "evomaster":
+            print(f"  сгенерировано тестов: {tool['summary']['tests_generated']}")
         if tool.get("baseline"):
+            print(f"  статус набора: {tool['baseline']['status']}")
             for t in tool["baseline"]["tests"]:
                 if t["outcome"] != "passed":
-                    msg = (t["message"] or "").splitlines()[0][:70] if t["message"] else ""
-                    print(f"  тест {t['outcome']}: {t['node_id']}  {msg}")
+                    msg = (t["message"] or "").splitlines()[0][:60] if t["message"] else ""
+                    cause = CAUSES.get(t.get("cause") or "", "")
+                    print(f"  тест {t['outcome']} [{cause}]: {t['node_id']}  {msg}")
 
     report = HERE / f"report-{args.service}-{run_id[:8]}.md"
     report.write_bytes(fetch(args.server.rstrip("/") + result["report"]["url"]))

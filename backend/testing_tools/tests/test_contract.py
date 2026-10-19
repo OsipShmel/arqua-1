@@ -74,6 +74,10 @@ def test_parse_yaml_contract_normalizes_status_codes() -> None:
         '{"swagger": "2.0", "info": {"title": "t", "version": "1"}, "paths": {}}',
         '{"openapi": "3.0.0", "paths": {}}',
         '{"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": []}',
+        '{"openapi": "3.0.0", "info": {"title": "t", "version": "1"}}',
+        '{"openapi": "3.0.0", "info": {"title": "t", "version": "1"}, "paths": {}}',
+        '{"openapi": "3.0.0", "info": {"title": "t", "version": "1"},'
+        ' "paths": {"/x": {"parameters": []}}}',
     ],
 )
 def test_invalid_contract(text: str) -> None:
@@ -91,6 +95,7 @@ async def test_load_inline_contract() -> None:
         contract = await load_contract(source, client)
 
     assert contract.info.title == "Yaml Store"
+    assert contract.info.source == "inline"
 
 
 @pytest.mark.anyio
@@ -108,6 +113,8 @@ async def test_load_url_contract_sends_headers() -> None:
         contract = await load_contract(source, client)
 
     assert contract.info.operations_total == 4
+    assert contract.info.source == "http://svc:8080/openapi.json"
+    assert contract.info.source == "http://svc:8080/openapi.json"
     assert str(seen[0].url) == "http://svc:8080/openapi.json"
     assert seen[0].headers["authorization"] == "Bearer t"
 

@@ -5,6 +5,8 @@ from datetime import datetime
 
 from testing_tools.api.schemas import (
     ContractCoverage,
+    EvoMasterResult,
+    FailureCause,
     Finding,
     MicrocksResult,
     MutantState,
@@ -15,6 +17,11 @@ from testing_tools.api.schemas import (
 )
 
 MAX_ROWS = 50
+CAUSES = {
+    FailureCause.SERVICE_DEFECT: "дефект сервиса",
+    FailureCause.TEST_ERROR: "ошибка теста",
+    FailureCause.INFRASTRUCTURE: "инфраструктура",
+}
 
 
 def render(result: RunResult) -> str:
@@ -25,15 +32,17 @@ def render(result: RunResult) -> str:
     findings = [
         f
         for t in result.tools
-        if isinstance(t, SchemathesisResult | MicrocksResult)
+        if isinstance(t, SchemathesisResult | MicrocksResult | EvoMasterResult)
         for f in t.findings
     ]
     if findings:
         lines += _findings(findings)
     for tool in result.tools:
-        if isinstance(tool, SchemathesisResult | MicrocksResult) and tool.coverage:
+        if isinstance(tool, SchemathesisResult | MicrocksResult | EvoMasterResult) and tool.coverage:
             lines += _coverage(tool.tool.value, tool.coverage)
         if isinstance(tool, MutationResult):
+            if tool.coverage:
+                lines += _coverage("тесты агента", tool.coverage)
             lines += _mutation(tool)
     return "\n".join(lines).rstrip() + "\n"
 
@@ -50,10 +59,13 @@ def _overview(result: RunResult) -> list[str]:
         rows.append(("Контракт", f"{result.contract.title} {result.contract.version} "
                                  f"(OpenAPI {result.contract.openapi_version}, "
                                  f"операций: {result.contract.operations_total})"))  # fmt: skip
+        rows.append(("Источник контракта", result.contract.source or "—"))
     if result.labels:
         rows.append(("Метки", ", ".join(f"{k}={v}" for k, v in result.labels.items())))
     if result.error:
         rows.append(("Ошибка", f"{result.error.code.value}: {result.error.message}"))
+    if result.environment:
+        rows.append(("Окружение", ", ".join(f"{k} {v}" for k, v in result.environment.items())))
     return _table(["Прогон", ""], rows) + [""]
 
 
@@ -62,6 +74,8 @@ def _metrics(metrics: RunMetrics) -> list[str]:
         ("Contract Coverage (операции)", _pct(metrics.contract_coverage)),
         ("Contract Coverage (коды ответов)", _pct(metrics.status_code_coverage)),
         ("Найдено проблем", str(metrics.faults.findings_total) if metrics.faults else "—"),
+        ("Покрытие операций тестами агента", _pct(metrics.tests_contract_coverage)),
+        ("Покрытие кодов ответов тестами агента", _pct(metrics.tests_status_code_coverage)),
         ("Test Suite Size", _num(metrics.test_suite_size)),
         ("Runnability", _pct(metrics.runnability)),
         ("Mutation Score", _pct(metrics.mutation_score)),
@@ -123,15 +137,25 @@ def _mutation(result: MutationResult) -> list[str]:
     if result.baseline:
         b = result.baseline
         out += [
-            f"Baseline: {b.passed} из {b.tests_total} прошли, упали {b.failed}, "
-            f"ошибок {b.errors}, пропущено {b.skipped}.",
+            f"Baseline ({b.status.value}): {b.passed} из {b.tests_total} прошли, "
+            f"упали {b.failed}, ошибок {b.errors}, пропущено {b.skipped}.",
             "",
         ]
+        if b.failure_causes:
+            causes = ", ".join(f"{CAUSES[c]} — {n}" for c, n in b.failure_causes.items())
+            out += [f"Причины падений: {causes}.", ""]
         if b.collection_errors:
             out += ["Не собрались: " + ", ".join(f"`{e}`" for e in b.collection_errors), ""]
-        rows = [(t.node_id, t.outcome.value, (t.message or "").splitlines()[0] if t.message
-                 else "") for t in b.tests[:MAX_ROWS]]  # fmt: skip
-        out += _table(["Тест", "Итог", "Сообщение"], rows) + [""]
+        rows = [
+            (
+                t.node_id,
+                t.outcome.value,
+                CAUSES[t.cause] if t.cause else "",
+                (t.message or "").splitlines()[0] if t.message else "",
+            )
+            for t in b.tests[:MAX_ROWS]
+        ]
+        out += _table(["Тест", "Итог", "Причина", "Сообщение"], rows) + [""]
     if result.summary:
         s = result.summary
         out += [

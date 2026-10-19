@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Sequence
 
 from testing_tools.api.schemas import (
+    EvoMasterResult,
     FaultMetrics,
     MicrocksResult,
     MutationResult,
@@ -14,15 +15,21 @@ from testing_tools.api.schemas import (
 from testing_tools.app.contract import LoadedContract
 from testing_tools.app.tools.common import Observations, OperationIndex, build_coverage, label
 
+BlackBoxResult = SchemathesisResult | MicrocksResult | EvoMasterResult
+BLACK_BOX = (SchemathesisResult, MicrocksResult, EvoMasterResult)
+
 
 def run_metrics(contract: LoadedContract, results: Sequence[ToolResult]) -> RunMetrics:
-    black_box = [r for r in results if isinstance(r, SchemathesisResult | MicrocksResult)]
+    black_box = [r for r in results if isinstance(r, BLACK_BOX)]
     mutation = next((r for r in results if isinstance(r, MutationResult)), None)
     coverage = _union_coverage(contract, black_box)
+    suite = mutation.coverage if mutation else None
     return RunMetrics(
         contract_coverage=coverage[0] if coverage else None,
         status_code_coverage=coverage[1] if coverage else None,
         faults=_faults(black_box),
+        tests_contract_coverage=round(suite.operations_ratio, 4) if suite else None,
+        tests_status_code_coverage=round(suite.status_codes_ratio, 4) if suite else None,
         test_suite_size=mutation.baseline.tests_total if mutation and mutation.baseline else None,
         runnability=mutation.baseline.runnability if mutation and mutation.baseline else None,
         mutation_score=(
@@ -32,9 +39,7 @@ def run_metrics(contract: LoadedContract, results: Sequence[ToolResult]) -> RunM
     )
 
 
-def _union_coverage(
-    contract: LoadedContract, results: Sequence[SchemathesisResult | MicrocksResult]
-) -> tuple[float, float] | None:
+def _union_coverage(contract: LoadedContract, results: Sequence[BlackBoxResult]) -> tuple[float, float] | None:
     """An operation / status code counts as covered if any tool covered it."""
     reports = [r.coverage for r in results if r.coverage is not None]
     if not reports:
@@ -53,7 +58,7 @@ def _union_coverage(
     return round(merged.operations_ratio, 4), round(merged.status_codes_ratio, 4)
 
 
-def _faults(results: Sequence[SchemathesisResult | MicrocksResult]) -> FaultMetrics | None:
+def _faults(results: Sequence[BlackBoxResult]) -> FaultMetrics | None:
     if not results:
         return None
     findings = [f for r in results for f in r.findings]

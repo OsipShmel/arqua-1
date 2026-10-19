@@ -12,7 +12,12 @@ def test_health_ok_when_all_tools_available(client: TestClient) -> None:
     assert r.json() == {
         "status": "ok",
         "version": "0.0.1",
-        "tools": {"schemathesis": True, "microcks": True, "mutation": True},
+        "tools": {
+            "schemathesis": True,
+            "microcks": True,
+            "mutation": True,
+            "evomaster": True,
+        },
     }
 
 

@@ -38,6 +38,8 @@ Swagger — `http://127.0.0.1:8000/docs`.
 | `TT_RESULTS_DIR`       | `results`    | куда сохранять завершённые прогоны (JSON + Markdown); пусто — не сохранять |
 | `TT_MAX_RUNS_IN_MEMORY`| `500`        | сколько завершённых прогонов держать в памяти; более старые читаются с диска |
 | `TT_ISOLATE_TEST_NETWORK` | `true`    | тестам агента разрешено соединяться только с тестируемым сервисом (через прокси) |
+| `TT_EVOMASTER_JAR`     | пусто        | путь к `evomaster.jar`; пусто — EvoMaster недоступен (`503`) |
+| `TT_JAVA_BIN`          | `java`       | Java 17+ для EvoMaster                             |
 | `TT_UV_BIN`            | `uv`         | `uv` для venv мутационных тестов с `requirements`  |
 
 ## Результаты прогонов
@@ -65,6 +67,14 @@ Swagger — `http://127.0.0.1:8000/docs`.
   и `TT_MICROCKS_URL=http://localhost:8585`. Microcks сам ходит в `target.base_url`,
   так что тестируемый сервис должен быть доступен **из контейнера Microcks**
   (для сервиса на хосте — `http://host.docker.internal:<port>`).
+- **EvoMaster** — jar-файл, нужна Java 17+. В Docker-образе уже есть
+  (`/opt/evomaster/evomaster.jar`). Локально:
+
+  ```bash
+  gh release download v6.2.0 -R WebFuzzing/EvoMaster -p evomaster.jar
+  ```
+
+  и `TT_EVOMASTER_JAR=/путь/к/evomaster.jar`.
 - **Мутационный раннер** встроен: поднимает прокси на `127.0.0.1` и гоняет pytest.
   Тесты агента выполняются этим же интерпретатором (в нём есть `pytest` и `httpx`);
   если у набора есть `requirements`, для него создаётся venv через `uv`. Для
@@ -102,4 +112,6 @@ uv run mypy src tests
 
 Тесты раннеров (`tests/test_tool_*.py`) по-настоящему запускают Schemathesis и pytest
 против тестового сервиса с заложенными багами (`tests/buggy_petstore.py`) и занимают
-около 30 секунд. Microcks в тестах подменён фейковым REST API.
+около 45 секунд. Microcks в тестах подменён фейковым REST API. Разбор отчёта EvoMaster
+проверяется на настоящем отчёте (`tests/data/evomaster_report.json`), а живой запуск
+EvoMaster включается переменной `EVOMASTER_JAR=/путь/к/evomaster.jar`.

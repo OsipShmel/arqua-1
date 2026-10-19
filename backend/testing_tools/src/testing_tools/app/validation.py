@@ -8,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 
 from testing_tools.api.schemas import (
     ErrorCode,
+    EvoMasterConfig,
     InlineTestSuite,
     MutationConfig,
     RunCreateRequest,
@@ -20,7 +21,10 @@ from testing_tools.app.errors import ApiError
 def check_path_regexes(request: RunCreateRequest) -> None:
     errors: list[dict[str, Any]] = []
     for i, tool in enumerate(request.tools):
-        if not isinstance(tool, SchemathesisConfig | MutationConfig) or tool.operations is None:
+        if (
+            not isinstance(tool, SchemathesisConfig | MutationConfig | EvoMasterConfig)
+            or tool.operations is None
+        ):
             continue
         for part in ("include", "exclude"):
             matcher = getattr(tool.operations, part)

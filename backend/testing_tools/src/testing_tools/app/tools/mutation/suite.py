@@ -5,7 +5,7 @@ import os
 import shutil
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -22,12 +22,22 @@ from testing_tools.app.tools.process import ProcessResult, run_process
 
 PLUGIN = Path(__file__).with_name("arqa_report_plugin.py")
 NETWORK_GUARD = Path(__file__).with_name("arqa_network_guard.py")
+FIXTURES = Path(__file__).with_name("arqa_fixtures.py")
 BASE_REQUIREMENTS = ("pytest", "httpx")
 GIT_TIMEOUT_S = 300.0
 INSTALL_TIMEOUT_S = 600.0
 # pytest exit codes: 0 ok, 1 tests failed, 5 nothing collected; 2-4 = the run itself broke
 # (collection errors don't stop the run: --continue-on-collection-errors)
 RUN_BROKEN_EXIT_CODES = {2, 3, 4}
+NO_TESTS_EXIT_CODE = 5
+
+
+@dataclass(frozen=True)
+class FailureDetail:
+    exc_types: list[str]
+    """Exception class names along the MRO, most specific first."""
+    when: str | None
+    """pytest phase that failed: setup, call or teardown."""
 
 
 @dataclass(frozen=True)
@@ -37,6 +47,12 @@ class SuiteRun:
     collection_errors: list[str]
     exitstatus: int | None
     """None when pytest left no report (crash, kill on timeout)."""
+    failures: dict[str, FailureDetail] = field(default_factory=dict)
+    """Per failed/errored node id."""
+
+    @property
+    def no_tests(self) -> bool:
+        return self.exitstatus == NO_TESTS_EXIT_CODE
 
     @property
     def broken(self) -> bool:
@@ -47,14 +63,23 @@ class SuiteRun:
 
 
 class Suite:
-    def __init__(self, root: Path, python: str, work_dir: Path, isolate_network: bool) -> None:
+    def __init__(
+        self,
+        root: Path,
+        python: str,
+        work_dir: Path,
+        isolate_network: bool,
+        frozen_requirements: bytes | None = None,
+    ) -> None:
         self.root = root
+        self.frozen_requirements = frozen_requirements
+        """`uv pip freeze` of the suite's own venv; None when our interpreter is used."""
         self._python = python
         self._work_dir = work_dir
         self._isolate_network = isolate_network
         self._plugin_dir = work_dir / "plugin"
         self._plugin_dir.mkdir(exist_ok=True)
-        for plugin in (PLUGIN, NETWORK_GUARD):
+        for plugin in (PLUGIN, NETWORK_GUARD, FIXTURES):
             shutil.copy(plugin, self._plugin_dir / plugin.name)
 
     @classmethod
@@ -63,7 +88,15 @@ class Suite:
     ) -> "Suite":
         root = await _materialize(config, work_dir / "suite")
         python = await _python(config.requirements, work_dir, uv_bin)
-        return cls(root, python, work_dir, isolate_network)
+        frozen = None
+        if python != sys.executable:
+            freeze = await run_process(
+                [uv_bin, "pip", "freeze", "--quiet", "--python", python],
+                cwd=work_dir,
+                timeout_s=60,
+            )
+            frozen = freeze.output if freeze.returncode == 0 else None
+        return cls(root, python, work_dir, isolate_network, frozen)
 
     async def run(
         self,
@@ -79,6 +112,7 @@ class Suite:
         args = [
             self._python, "-m", "pytest",
             "-p", PLUGIN.stem,
+            "-p", FIXTURES.stem,
             "-p", "no:cacheprovider",
             "--continue-on-collection-errors",
             "-q", "--rootdir", str(self.root),
@@ -95,6 +129,7 @@ class Suite:
         env.update(
             {
                 config.base_url_env: base_url,
+                "ARQA_TARGET_URL": base_url,
                 "ARQA_REPORT_PATH": str(report),
                 "PYTHONPATH": os.pathsep.join([str(self._plugin_dir), str(self.root)]),
                 "PYTHONDONTWRITEBYTECODE": "1",
@@ -114,7 +149,18 @@ class Suite:
             )
             for node_id, record in data["tests"].items()
         ]
-        return SuiteRun(process, tests, list(data["collection_errors"]), int(data["exitstatus"]))
+        failures = {
+            node_id: FailureDetail(record.get("exc_types") or [], record.get("when"))
+            for node_id, record in data["tests"].items()
+            if record["outcome"] in ("failed", "error")
+        }
+        return SuiteRun(
+            process,
+            tests,
+            list(data["collection_errors"]),
+            int(data["exitstatus"]),
+            failures,
+        )
 
 
 async def _materialize(config: MutationConfig, dest: Path) -> Path:

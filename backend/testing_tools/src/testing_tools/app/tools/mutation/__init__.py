@@ -6,19 +6,23 @@
    status codes the tests actually reach.
 4. Every mutant is switched on in the proxy in turn and the baseline-passing tests are
    re-run. A test that passed on baseline and fails now kills the mutant.
+   `max_mutants=0` stops after the baseline: just run the tests and report.
 """
 
 import random
+from collections import Counter
 
 from testing_tools.api.schemas import (
     BaselineResult,
     ErrorCode,
+    FailureCause,
     Mutant,
     MutantState,
     MutationConfig,
     MutationOperator,
     MutationResult,
     MutationSummary,
+    SuiteStatus,
     TestOutcome,
     ToolConfig,
     ToolResult,
@@ -27,7 +31,14 @@ from testing_tools.api.schemas import (
 from testing_tools.app.contract import select_operations
 from testing_tools.app.settings import VERSION
 from testing_tools.app.tools.base import ToolContext, ToolError
-from testing_tools.app.tools.common import Observations, OperationIndex, documented_key, label
+from testing_tools.app.tools.common import (
+    Observations,
+    OperationIndex,
+    build_coverage,
+    documented_key,
+    label,
+)
+from testing_tools.app.tools.mutation.causes import classify
 from testing_tools.app.tools.mutation.mutants import MutantSpec, generate, sample
 from testing_tools.app.tools.mutation.proxy import MutatingProxy, serve
 from testing_tools.app.tools.mutation.suite import Suite, SuiteRun
@@ -43,6 +54,8 @@ class MutationRunner:
         suite = await Suite.prepare(
             config, ctx.work_dir, ctx.settings.uv_bin, ctx.settings.isolate_test_network
         )
+        if suite.frozen_requirements is not None:
+            ctx.add_artifact("mutation-requirements.txt", "text/plain", suite.frozen_requirements)
         ctx.set_progress(0.05)
 
         selected = select_operations(ctx.contract.operations, config.operations)
@@ -56,15 +69,16 @@ class MutationRunner:
             proxy.reset(None)
             baseline_run = await suite.run(config, url, config.per_mutant_timeout_s, junit=junit)
             reached = proxy.observed
+            upstream_errors = proxy.upstream_errors > 0
             _check_baseline(baseline_run, config)
             log.append(f"==== baseline ====\n{baseline_run.process.output.decode(errors='replace')}")
             if junit.exists():
                 ctx.add_artifact("mutation-baseline-junit.xml", "application/xml", junit.read_bytes())
-            baseline = _baseline(baseline_run)
+            baseline = _baseline(baseline_run, upstream_errors)
             ctx.set_progress(0.1)
 
-            passed = [t.node_id for t in baseline_run.tests if t.outcome == TestOutcome.PASSED]
-            failing = [t.node_id for t in baseline_run.tests if t.outcome != TestOutcome.PASSED]
+            passed = [t.node_id for t in baseline.tests if t.outcome == TestOutcome.PASSED]
+            failing = [t.node_id for t in baseline.tests if t.outcome != TestOutcome.PASSED]
             mutants: list[Mutant] = []
             for i, spec in enumerate(specs, start=1):
                 if not passed or not _reached(spec, reached):
@@ -77,6 +91,7 @@ class MutationRunner:
                     mutants.append(_classify(spec, run, passed, proxy.applied))
                     log.append(_log_entry(mutants[-1], run))
                 ctx.set_progress(0.1 + 0.85 * i / len(specs))
+        ctx.set_progress(0.95)
 
         ctx.add_artifact("mutation-pytest.log", "text/plain", "\n".join(log).encode())
         summary = _summary(mutants, config.operators)
@@ -86,6 +101,7 @@ class MutationRunner:
             tool_version=VERSION,
             seed=seed,
             baseline=baseline,
+            coverage=build_coverage(ctx.contract.operations, reached),
             summary=summary,
             mutants=mutants,
         )
@@ -112,13 +128,33 @@ def _reached(spec: MutantSpec, observed: Observations) -> bool:
     return any(documented_key(spec.operation, s) == spec.status_key for s in statuses)
 
 
-def _baseline(run: SuiteRun) -> BaselineResult:
-    counts = {outcome: 0 for outcome in TestOutcome}
+def _baseline(run: SuiteRun, upstream_errors: bool) -> BaselineResult:
+    tests = []
     for test in run.tests:
-        counts[test.outcome] += 1
+        detail = run.failures.get(test.node_id)
+        cause = classify(
+            test.outcome,
+            detail.exc_types if detail else [],
+            test.message,
+            detail.when if detail else None,
+            upstream_errors,
+        )
+        exception = detail.exc_types[0] if detail and detail.exc_types else None
+        tests.append(test.model_copy(update={"cause": cause, "exception": exception}))
+    counts = Counter(test.outcome for test in tests)
+    causes = Counter(test.cause for test in tests if test.cause is not None)
+    if run.collection_errors:
+        causes[FailureCause.TEST_ERROR] += len(run.collection_errors)
     errors = counts[TestOutcome.ERROR] + len(run.collection_errors)
-    total = len(run.tests) + len(run.collection_errors)
+    total = len(tests) + len(run.collection_errors)
+    if run.no_tests and not run.collection_errors:
+        status = SuiteStatus.NO_TESTS
+    elif run.collection_errors:
+        status = SuiteStatus.COLLECTION_ERRORS
+    else:
+        status = SuiteStatus.COMPLETED
     return BaselineResult(
+        status=status,
         tests_total=total,
         passed=counts[TestOutcome.PASSED],
         failed=counts[TestOutcome.FAILED],
@@ -126,8 +162,9 @@ def _baseline(run: SuiteRun) -> BaselineResult:
         skipped=counts[TestOutcome.SKIPPED],
         collection_errors=run.collection_errors,
         runnability=counts[TestOutcome.PASSED] / total if total else 0.0,
-        duration_s=round(sum(t.duration_s for t in run.tests), 4),
-        tests=run.tests,
+        failure_causes=dict(causes),
+        duration_s=round(sum(t.duration_s for t in tests), 4),
+        tests=tests,
     )
 
 

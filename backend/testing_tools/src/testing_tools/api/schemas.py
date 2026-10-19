@@ -41,6 +41,7 @@ class ToolName(StrEnum):
     SCHEMATHESIS = "schemathesis"
     MICROCKS = "microcks"
     MUTATION = "mutation"
+    EVOMASTER = "evomaster"
 
 
 class HttpMethod(StrEnum):
@@ -222,6 +223,30 @@ class MicrocksConfig(Schema):
     )
 
 
+class EvoMasterConfig(Schema):
+    """EvoMaster в black-box режиме: эволюционный поиск входных данных по контракту.
+
+    Глубже Schemathesis, но дольше: бюджет задаётся временем. Помимо находок
+    генерирует свой набор тестов (Python unittest) — он кладётся артефактом.
+    """
+
+    tool: Literal[ToolName.EVOMASTER] = ToolName.EVOMASTER
+    max_time_s: int = Field(default=60, ge=10, le=3600, description="Бюджет поиска.")
+    seed: int | None = Field(default=None, description="Для воспроизводимости прогона.")
+    schema_oracles: bool = Field(
+        default=True, description="Проверять ответы на соответствие схеме контракта."
+    )
+    disabled_oracle_codes: list[int] = Field(
+        default_factory=list,
+        description="Коды категорий дефектов WFC, которые не искать (например, 308).",
+        examples=[[308]],
+    )
+    rate_per_minute: int | None = Field(
+        default=None, ge=1, description="Ограничение числа запросов к сервису в минуту."
+    )
+    operations: OperationFilter | None = None
+
+
 class MutationOperator(StrEnum):
     """Операторы мутации данных на уровне контракта (ТЗ п.2.2).
 
@@ -279,7 +304,10 @@ class MutationConfig(Schema):
         default_factory=lambda: list(MutationOperator), min_length=1
     )
     max_mutants: int | None = Field(
-        default=None, ge=1, description="Ограничение числа мутантов (случайная выборка по seed)."
+        default=None,
+        ge=0,
+        description="Ограничение числа мутантов (случайная выборка по seed). "
+        "0 — только прогнать тесты (baseline), без мутаций.",
     )
     per_mutant_timeout_s: float = Field(default=120.0, gt=0, le=3600)
     seed: int | None = None
@@ -287,7 +315,8 @@ class MutationConfig(Schema):
 
 
 ToolConfig = Annotated[
-    SchemathesisConfig | MicrocksConfig | MutationConfig, Field(discriminator="tool")
+    SchemathesisConfig | MicrocksConfig | MutationConfig | EvoMasterConfig,
+    Field(discriminator="tool"),
 ]
 
 
@@ -403,6 +432,9 @@ class ContractInfo(Schema):
     openapi_version: str = Field(examples=["3.0.3", "3.1.0"])
     operations_total: int
     sha256: str = Field(description="Хэш контракта, по которому шёл прогон.")
+    source: str | None = Field(
+        default=None, description='URL контракта или "inline", если он пришёл в запросе.'
+    )
 
 
 class ArtifactRef(Schema):
@@ -542,6 +574,34 @@ class MicrocksResult(ToolResultBase):
     findings: list[Finding] = Field(default_factory=list)
 
 
+# --- EvoMaster -------------------------------------------------------------- #
+
+
+class EvoMasterSummary(Schema):
+    operations_selected: int
+    tests_generated: int
+    http_calls_evaluated: int = Field(description="Сколько запросов сделал поиск.")
+    faults: int = Field(description="Дефекты по отчёту EvoMaster (до схлопывания дублей).")
+    faults_by_category: dict[str, int] = Field(
+        description="По категориям WFC, ключ — идентификатор категории.",
+        examples=[{"SCHEMA_INVALID_RESPONSE": 4, "HTTP_STATUS_500": 1}],
+    )
+
+
+class EvoMasterResult(ToolResultBase):
+    tool: Literal[ToolName.EVOMASTER] = ToolName.EVOMASTER
+    seed: int | None = None
+    summary: EvoMasterSummary | None = None
+    coverage: ContractCoverage | None = Field(
+        default=None, description="По запросам из сохранённых тестов EvoMaster."
+    )
+    findings: list[Finding] = Field(default_factory=list)
+    generated_tests: list[str] = Field(
+        default_factory=list,
+        description="Тесты EvoMaster: файл#имя; сами файлы — в артефакте evomaster-tests.zip.",
+    )
+
+
 # --- Mutation --------------------------------------------------------------- #
 
 
@@ -552,16 +612,37 @@ class TestOutcome(StrEnum):
     SKIPPED = "skipped"
 
 
+class FailureCause(StrEnum):
+    """Вероятная причина падения теста (эвристика по типу исключения)."""
+
+    SERVICE_DEFECT = "service_defect"  # проверка ответа не прошла: несоответствие контракту
+    TEST_ERROR = "test_error"  # ошибка тестового кода: импорт, синтаксис, фикстуры, NameError...
+    INFRASTRUCTURE = "infrastructure"  # сервис/стенд недоступен: соединение, таймаут, 502
+
+
 class TestCaseResult(Schema):
     node_id: str = Field(examples=["tests/test_pets.py::test_get_pet_not_found"])
     outcome: TestOutcome
     duration_s: float
     message: str | None = Field(default=None, description="Короткий текст ошибки/assert.")
+    cause: FailureCause | None = Field(
+        default=None, description="Для failed/error: вероятная причина падения."
+    )
+    exception: str | None = Field(
+        default=None, description="Тип исключения, уронившего тест.", examples=["AssertionError"]
+    )
+
+
+class SuiteStatus(StrEnum):
+    COMPLETED = "completed"  # набор собран и выполнен
+    COLLECTION_ERRORS = "collection_errors"  # часть файлов не собралась, остальные выполнены
+    NO_TESTS = "no_tests"  # pytest не нашёл ни одного теста
 
 
 class BaselineResult(Schema):
     """Прогон тестов против немутированного сервиса (метрика Runnability)."""
 
+    status: SuiteStatus = SuiteStatus.COMPLETED
     tests_total: int
     passed: int
     failed: int
@@ -571,6 +652,10 @@ class BaselineResult(Schema):
         default_factory=list, description="Файлы, которые pytest не смог собрать."
     )
     runnability: float = Field(ge=0, le=1, description="passed / tests_total.")
+    failure_causes: dict[FailureCause, int] = Field(
+        default_factory=dict,
+        description="Падения по причинам; ошибки сбора считаются test_error.",
+    )
     duration_s: float
     tests: list[TestCaseResult]
 
@@ -618,17 +703,22 @@ class MutationResult(ToolResultBase):
     tool: Literal[ToolName.MUTATION] = ToolName.MUTATION
     seed: int | None = None
     baseline: BaselineResult | None = None
+    coverage: ContractCoverage | None = Field(
+        default=None,
+        description="Какие операции и коды ответов контракта затронули тесты агента (baseline).",
+    )
     summary: MutationSummary | None = None
     mutants: list[Mutant] = Field(default_factory=list)
 
 
 ToolResult = Annotated[
-    SchemathesisResult | MicrocksResult | MutationResult, Field(discriminator="tool")
+    SchemathesisResult | MicrocksResult | MutationResult | EvoMasterResult,
+    Field(discriminator="tool"),
 ]
 
 
 class FaultMetrics(Schema):
-    """Находки black-box инструментов (schemathesis, microcks) — Fault Detection."""
+    """Находки black-box инструментов (schemathesis, microcks, evomaster) — Fault Detection."""
 
     findings_total: int
     by_severity: dict[Severity, int]
@@ -652,6 +742,15 @@ class RunMetrics(Schema):
         description="Доля задокументированных ответов, которые наблюдал хотя бы один инструмент.",
     )
     faults: FaultMetrics | None = None
+    tests_contract_coverage: float | None = Field(
+        default=None, ge=0, le=1, description="Доля операций, которые вызывают тесты агента."
+    )
+    tests_status_code_coverage: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Доля задокументированных ответов, которые получили тесты агента.",
+    )
     test_suite_size: int | None = Field(
         default=None, description="Тестов в наборе агента (mutation.baseline.tests_total)."
     )
@@ -676,6 +775,11 @@ class RunResult(Schema):
     target_base_url: str
     tools: list[ToolResult]
     metrics: RunMetrics = Field(default_factory=RunMetrics)
+    environment: dict[str, str] = Field(
+        default_factory=dict,
+        description="Версии Python, testing_tools и инструментов — для воспроизводимости.",
+        examples=[{"python": "3.14.0", "testing-tools": "0.1.0", "schemathesis": "4.29.0"}],
+    )
     report: ArtifactRef | None = Field(
         default=None, description="Markdown-отчёт по прогону; есть у завершённых прогонов."
     )

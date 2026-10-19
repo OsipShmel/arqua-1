@@ -46,7 +46,9 @@
 | `app/tools/stub.py`   | `StubRunner` — обёртка над `build_result()` с задержкой                     |
 | `app/tools/schemathesis.py` | `SchemathesisRunner` — `st run` подпроцессом, разбор JSON/NDJSON-отчётов |
 | `app/tools/microcks.py` | `MicrocksRunner` — клиент REST API Microcks                               |
-| `app/tools/mutation/` | `MutationRunner`: `mutants.py` (генерация и применение), `proxy.py` (мутирующий прокси), `suite.py` (набор тестов, окружение, pytest), `arqa_report_plugin.py` (pytest-плагин отчёта), `arqa_network_guard.py` (pytest-плагин сетевой изоляции) |
+| `app/tools/evomaster.py` | `EvoMasterRunner` — `java -jar evomaster.jar` в black-box режиме, разбор WFC-отчёта |
+| `app/environment.py`  | `environment()` — версии Python и пакетов для `RunResult.environment`      |
+| `app/tools/mutation/` | `MutationRunner`: `mutants.py` (генерация и применение), `proxy.py` (мутирующий прокси), `suite.py` (набор тестов, окружение, pytest), `arqa_report_plugin.py` (pytest-плагин отчёта), `arqa_network_guard.py` (pytest-плагин сетевой изоляции), `arqa_fixtures.py` (фикстуры `base_url`, `http_client`), `causes.py` (причина падения теста) |
 
 Зависимости между модулями идут сверху вниз: `routes` → `validation`/`contract`/`store`/`engine`;
 `engine` → `store`/`tools`; `tools` → `contract`/`settings`/`store`/`stub_results`;
@@ -85,7 +87,7 @@
 6. `check_tools_available(body, settings.down_tools())` → `503 tool_unavailable`, в `detail`
    перечислены недоступные инструменты. Доступность считает `Settings.tool_available()`:
    инструмент не в `TT_UNAVAILABLE_TOOLS`, и в режиме `real` для Schemathesis установлен
-   пакет, а для Microcks задан `TT_MICROCKS_URL`.
+   пакет, для Microcks задан `TT_MICROCKS_URL`, для EvoMaster существует `TT_EVOMASTER_JAR`.
 7. `check_test_suites` — для `mutation` с inline-тестами пути должны быть непустыми,
    относительными и без `..` (проверяются и POSIX-, и Windows-варианты), иначе
    `422 test_suite_invalid`.
@@ -122,7 +124,9 @@
   `contract_unreachable`.
 - `parse_contract(text)`: сначала пробует JSON, потом YAML. Требует корень-объект,
   `openapi: "3.*"`, `info.title`, `info.version`; `paths` — объект или отсутствует.
-  Нарушение → `contract_invalid`. `sha256` считается по исходному тексту.
+  Нарушение → `contract_invalid`. `paths` обязателен, и в нём должна быть хотя бы одна
+  HTTP-операция. `sha256` считается по исходному тексту; `load_contract` дописывает в
+  `ContractInfo.source` URL или `inline`.
 - Результат — `LoadedContract(info: ContractInfo, operations: tuple[ContractOperation, ...],
   document: dict)`. `document` — разобранный документ как есть; из него раннеры берут
   схемы ответов и собирают отфильтрованный контракт.
@@ -232,6 +236,22 @@
 6. Каждый проваленный шаг — `Finding` с `check = runner` и `severity=high`.
 7. Если `cleanup=true`, сервис удаляется в `finally` (даже при ошибке или отмене).
 
+### EvoMaster (`evomaster.py`)
+
+1. Нужен `TT_EVOMASTER_JAR` (существующий файл), иначе `ToolError(tool_unavailable)`;
+   больше трёх `target.headers` — `ToolError(tool_failed)` (`--header0..2`).
+2. `evomaster_document`: отфильтрованный контракт, `parameters` уровня пути скопированы в
+   каждую операцию (EvoMaster их пропускает с предупреждением «path-scope»), `servers` —
+   `target.base_url`; `--base` — только схема, хост и порт.
+3. `java -jar ... --blackBox true --outputFormat PYTHON_UNITTEST --writeWFCReport true`.
+   Таймаут процесса — `2 × max_time_s + 120 с`; прогресс тикает по времени до 0.9.
+4. Артефакты: `evomaster-output.log`, `evomaster-report.json`, `evomaster-tests.zip`
+   (все `*.py` из каталога вывода).
+5. `_result` читает WFC-отчёт: `faults.foundFaults` → `Finding` по каждой категории
+   (дубли код + операция + контекст схлопываются), `problemDetails.rest.coveredHttpStatus`
+   → покрытие (эндпоинты вида `GET:/pets`; зонды `OPTIONS` не считаются).
+   Названия категорий и severity — таблица `CATEGORIES` в модуле.
+
 ### Мутации (`mutation/`)
 
 1. `Suite.prepare`: inline-файлы раскладываются в `work_dir/suite`, git-репозиторий
@@ -265,6 +285,11 @@
      `no_coverage` — мутация ни разу не применилась (например, поля нет в ответе);
      `killed` — упал хотя бы один тест, прошедший baseline; иначе `survived`.
 7. Формулы `runnability`, `mutation_score` и итоговый `state` — как в `API.md`.
+8. `max_mutants=0` — только baseline. Причина каждого падения — `causes.classify` по
+   классам исключения (плагин отчёта пишет MRO исключения и фазу setup/call/teardown),
+   502 считается инфраструктурой, только если прокси не достучался до сервиса.
+   `coverage` строится по `proxy.observed` с baseline. Для venv с `requirements`
+   сохраняется `uv pip freeze` (`mutation-requirements.txt`).
 
 ## Заглушечные результаты (`app/stub_results.py`, режим `stub`)
 
@@ -312,6 +337,8 @@
 | `test_tool_microcks.py`    | `MicrocksRunner` против фейкового REST API Microcks (`MockTransport`) |
 | `test_tool_mutation.py`    | настоящие прокси и pytest против `buggy_petstore`: baseline, мутанты, git-набор, ошибки набора |
 | `test_results.py`          | `metrics`, Markdown-отчёт, сохранение на диск и чтение после «перезапуска», вытеснение из памяти, маскирование запроса |
+| `test_tool_evomaster.py`   | разбор настоящего WFC-отчёта (`data/evomaster_report.json`), подготовка контракта, флаги CLI, ошибки; живой запуск при `EVOMASTER_JAR` |
+| `test_tool_causes.py`      | классификация причин падения тестов |
 | `test_tool_engine_real.py` | движок с подставными раннерами (`ToolError`, падение, проверка target, временные каталоги), `run_process` |
 | `petstore.py`              | эталонный контракт (4 операции) и `inline_contract()`, общие для всех тестов |
 | `test_settings.py`, `test_health.py`, `test_tools_endpoint.py`, `test_entrypoint.py` | настройки, `/health`, `/tools`, `main()` |

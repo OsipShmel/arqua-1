@@ -2,10 +2,16 @@
 #   docker build -f backend/testing_tools/Dockerfile -t testing-tools .
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
-# git: mutation test suites can come from a repository
+# git: mutation test suites can come from a repository; Java 17: EvoMaster
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git \
+    && apt-get install -y --no-install-recommends git openjdk-17-jre-headless \
     && rm -rf /var/lib/apt/lists/*
+
+ARG EVOMASTER_VERSION=6.2.0
+ADD --checksum=sha256:93f9c4a0de88b01395d2a1009776aa739973e9f64343778d2fd49c212fd17915 \
+    https://github.com/WebFuzzing/EvoMaster/releases/download/v${EVOMASTER_VERSION}/evomaster.jar \
+    /opt/evomaster/evomaster.jar
+RUN chmod 0644 /opt/evomaster/evomaster.jar
 
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
@@ -29,6 +35,7 @@ ENV PATH=/app/.venv/bin:$PATH \
     TT_HOST=0.0.0.0 \
     TT_PORT=8000 \
     TT_RESULTS_DIR=/data/results \
+    TT_EVOMASTER_JAR=/opt/evomaster/evomaster.jar \
     UV_CACHE_DIR=/tmp/uv-cache
 EXPOSE 8000
 CMD ["testing-tools"]

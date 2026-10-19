@@ -41,7 +41,7 @@ class LoadedContract:
 
 async def load_contract(source: ContractSource, client: httpx2.AsyncClient) -> LoadedContract:
     if isinstance(source, InlineContractSource):
-        return parse_contract(source.content)
+        return _with_source(parse_contract(source.content), "inline")
     try:
         response = await client.get(
             str(source.url), headers=source.headers, timeout=FETCH_TIMEOUT_S
@@ -52,7 +52,12 @@ async def load_contract(source: ContractSource, client: httpx2.AsyncClient) -> L
         raise ApiError(
             422, ErrorCode.CONTRACT_UNREACHABLE, f"{source.url}: HTTP {response.status_code}"
         )
-    return parse_contract(response.text)
+    return _with_source(parse_contract(response.text), str(source.url))
+
+
+def _with_source(contract: LoadedContract, source: str) -> LoadedContract:
+    info = contract.info.model_copy(update={"source": source})
+    return LoadedContract(info=info, operations=contract.operations, document=contract.document)
 
 
 def parse_contract(text: str) -> LoadedContract:
@@ -63,11 +68,15 @@ def parse_contract(text: str) -> LoadedContract:
     info = doc.get("info")
     if not isinstance(info, dict) or "title" not in info or "version" not in info:
         raise _invalid("info.title and info.version are required")
-    paths = doc.get("paths", {})
+    if "paths" not in doc:
+        raise _invalid("paths is required")
+    paths = doc["paths"]
     if not isinstance(paths, dict):
         raise _invalid("paths must be an object")
 
     operations = tuple(_operations(paths))
+    if not operations:
+        raise _invalid("the contract has no HTTP operations under paths")
     return LoadedContract(
         info=ContractInfo(
             title=str(info["title"]),

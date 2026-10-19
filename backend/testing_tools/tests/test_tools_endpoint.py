@@ -1,6 +1,12 @@
 from fastapi.testclient import TestClient
 
-from testing_tools.api.schemas import MicrocksConfig, MutationConfig, SchemathesisConfig, ToolName
+from testing_tools.api.schemas import (
+    EvoMasterConfig,
+    MicrocksConfig,
+    MutationConfig,
+    SchemathesisConfig,
+    ToolName,
+)
 from testing_tools.app.main import create_app
 from testing_tools.app.settings import Settings
 
@@ -10,12 +16,13 @@ def test_tools_lists_every_tool_with_its_config_schema(client: TestClient) -> No
 
     assert r.status_code == 200
     tools = r.json()
-    assert [t["tool"] for t in tools] == ["schemathesis", "microcks", "mutation"]
+    assert [t["tool"] for t in tools] == ["schemathesis", "microcks", "mutation", "evomaster"]
     assert all(t["available"] for t in tools)
     assert all(t["description"] for t in tools)
     assert tools[0]["config_schema"] == SchemathesisConfig.model_json_schema()
     assert tools[1]["config_schema"] == MicrocksConfig.model_json_schema()
     assert tools[2]["config_schema"] == MutationConfig.model_json_schema()
+    assert tools[3]["config_schema"] == EvoMasterConfig.model_json_schema()
 
 
 def test_unavailable_tool_has_no_version() -> None:

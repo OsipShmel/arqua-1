@@ -1,4 +1,5 @@
 import importlib.util
+from pathlib import Path
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar
 
@@ -49,6 +50,10 @@ class Settings(BaseSettings):
     """Finished runs kept in memory; older ones are served from `results_dir`."""
     isolate_test_network: bool = True
     """Agent tests may only connect to the service under test (through the proxy)."""
+    evomaster_jar: str = ""
+    """Path to evomaster.jar; empty = EvoMaster unavailable."""
+    java_bin: str = "java"
+    """Java 17+ used to run EvoMaster."""
     uv_bin: str = "uv"
     """Used to build a venv for mutation test suites that declare `requirements`."""
 
@@ -71,6 +76,8 @@ class Settings(BaseSettings):
                 return bool(self.microcks_url)
             case ToolName.MUTATION:
                 return True
+            case ToolName.EVOMASTER:
+                return bool(self.evomaster_jar) and Path(self.evomaster_jar).is_file()
 
     def down_tools(self) -> frozenset[ToolName]:
         return frozenset(tool for tool in ToolName if not self.tool_available(tool))

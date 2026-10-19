@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from testing_tools.api.schemas import (
     ErrorCode,
+    EvoMasterConfig,
     MicrocksConfig,
     MutationConfig,
     ProblemDetail,
@@ -34,12 +35,14 @@ TOOL_CONFIGS: dict[ToolName, type[BaseModel]] = {
     ToolName.SCHEMATHESIS: SchemathesisConfig,
     ToolName.MICROCKS: MicrocksConfig,
     ToolName.MUTATION: MutationConfig,
+    ToolName.EVOMASTER: EvoMasterConfig,
 }
 
 TOOL_DESCRIPTIONS: dict[ToolName, str] = {
     ToolName.SCHEMATHESIS: "Property-based API fuzzing",
     ToolName.MICROCKS: "Contract testing by OpenAPI examples",
     ToolName.MUTATION: "Contract-level mutation testing of pytest suites",
+    ToolName.EVOMASTER: "Evolutionary black-box API fuzzing (deep, time-budgeted)",
 }
 
 

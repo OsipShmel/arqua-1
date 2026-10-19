@@ -8,6 +8,7 @@ from testing_tools.api.schemas import (
     TERMINAL_RUN_STATES,
     ArtifactRef,
     ErrorInfo,
+    EvoMasterResult,
     MicrocksResult,
     MutationResult,
     RunCreated,
@@ -24,14 +25,18 @@ from testing_tools.api.schemas import (
     ToolState,
 )
 from testing_tools.app.contract import LoadedContract
+from testing_tools.app.environment import environment
 from testing_tools.app.metrics import run_metrics
 
 REPORT_ARTIFACT = "run-report.md"
 
-RESULT_TYPES: dict[ToolName, type[SchemathesisResult | MicrocksResult | MutationResult]] = {
+RESULT_TYPES: dict[
+    ToolName, type[SchemathesisResult | MicrocksResult | MutationResult | EvoMasterResult]
+] = {
     ToolName.SCHEMATHESIS: SchemathesisResult,
     ToolName.MICROCKS: MicrocksResult,
     ToolName.MUTATION: MutationResult,
+    ToolName.EVOMASTER: EvoMasterResult,
 }
 
 
@@ -152,6 +157,7 @@ class RunRecord:
             target_base_url=str(self.request.target.base_url),
             tools=results,
             metrics=run_metrics(self.contract, results),
+            environment=environment(),
             report=ArtifactRef(
                 name=REPORT_ARTIFACT,
                 media_type=report.media_type,

@@ -57,11 +57,13 @@ class MutatingProxy:
         )
         self.active: MutantSpec | None = None
         self.applied = 0
+        self.upstream_errors = 0
         self.observed = Observations()
 
     def reset(self, mutant: MutantSpec | None) -> None:
         self.active = mutant
         self.applied = 0
+        self.upstream_errors = 0
         self.observed = Observations()
 
     async def aclose(self) -> None:
@@ -93,6 +95,7 @@ class MutatingProxy:
             )
         except httpx2.HTTPError as exc:
             log.warning("proxy: %s %s failed: %s", scope["method"], url, exc)
+            self.upstream_errors += 1
             await _respond(send, 502, [], f"upstream error: {exc}".encode())
             return
 

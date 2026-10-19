@@ -7,9 +7,11 @@ import pytest
 
 from testing_tools.api.schemas import (
     ErrorCode,
+    FailureCause,
     MutantState,
     MutationConfig,
     MutationResult,
+    SuiteStatus,
     ToolState,
 )
 from testing_tools.api.schemas import TestOutcome as Outcome
@@ -226,3 +228,84 @@ async def test_network_isolation(
         assert "network access" in (direct.message or "")
     else:
         assert direct.outcome == Outcome.PASSED
+
+
+async def test_trusted_fixtures_and_failure_causes(
+    tmp_path: Path, contract: LoadedContract, petstore_url: str
+) -> None:
+    ctx, _ = make_ctx(tmp_path, contract, petstore_url)
+    tests = (
+        "def test_ok(http_client, base_url):\n"
+        "    assert base_url.startswith('http://127.0.0.1:')\n"
+        "    assert http_client.get('/pets').status_code == 200\n\n"
+        "def test_service_defect(http_client):\n"
+        "    assert isinstance(http_client.get('/pets/1').json()['id'], int)\n\n"
+        "def test_broken_test_code(http_client):\n"
+        "    undefined_helper()\n\n"
+        "def test_missing_fixture(no_such_fixture):\n"
+        "    pass\n"
+    )
+
+    result = await MutationRunner().run(
+        config({"test_x.py": tests}, max_mutants=0), ctx
+    )
+
+    assert isinstance(result, MutationResult) and result.baseline is not None
+    by_name = {t.node_id.split("::")[1]: t for t in result.baseline.tests}
+    assert by_name["test_ok"].cause is None
+    assert by_name["test_service_defect"].cause == FailureCause.SERVICE_DEFECT
+    assert by_name["test_service_defect"].exception == "AssertionError"
+    assert by_name["test_broken_test_code"].cause == FailureCause.TEST_ERROR
+    assert by_name["test_broken_test_code"].exception == "NameError"
+    assert by_name["test_missing_fixture"].outcome == Outcome.ERROR
+    assert by_name["test_missing_fixture"].cause == FailureCause.TEST_ERROR
+    assert result.baseline.failure_causes == {
+        FailureCause.SERVICE_DEFECT: 1,
+        FailureCause.TEST_ERROR: 2,
+    }
+    assert result.baseline.status == SuiteStatus.COMPLETED
+
+
+async def test_baseline_only_mode_reports_suite_coverage(
+    tmp_path: Path, contract: LoadedContract, petstore_url: str
+) -> None:
+    ctx, _ = make_ctx(tmp_path, contract, petstore_url)
+
+    result = await MutationRunner().run(config(max_mutants=0), ctx)
+
+    assert isinstance(result, MutationResult)
+    assert result.mutants == []
+    assert result.summary is not None and result.summary.mutants_total == 0
+    coverage = result.coverage
+    assert coverage is not None
+    # TESTS call GET /pets (200) and GET /pets/999 (404); POST /pets is never called
+    assert (coverage.operations_total, coverage.operations_tested) == (3, 2)
+    get_pet = coverage.by_operation[2]
+    assert get_pet.observed_status_codes == [404]
+    assert coverage.by_operation[1].tested is False
+
+
+async def test_no_tests_status(
+    tmp_path: Path, contract: LoadedContract, petstore_url: str
+) -> None:
+    ctx, _ = make_ctx(tmp_path, contract, petstore_url)
+
+    result = await MutationRunner().run(config({"helpers.py": "X = 1\n"}), ctx)
+
+    assert isinstance(result, MutationResult) and result.baseline is not None
+    assert result.baseline.status == SuiteStatus.NO_TESTS
+    assert result.baseline.tests_total == 0
+    assert result.state == ToolState.FAILED
+
+
+async def test_collection_errors_status_and_cause(
+    tmp_path: Path, contract: LoadedContract, petstore_url: str
+) -> None:
+    ctx, _ = make_ctx(tmp_path, contract, petstore_url)
+    files = {"conftest.py": CONFTEST, "test_ok.py": TESTS, "test_broken.py": "import nope\n"}
+
+    result = await MutationRunner().run(config(files, max_mutants=0), ctx)
+
+    assert isinstance(result, MutationResult) and result.baseline is not None
+    assert result.baseline.status == SuiteStatus.COLLECTION_ERRORS
+    assert result.baseline.failure_causes[FailureCause.TEST_ERROR] == 1

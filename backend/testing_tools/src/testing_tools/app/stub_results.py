@@ -8,6 +8,9 @@ from pathlib import PurePosixPath
 from testing_tools.api.schemas import (
     BaselineResult,
     ContractCoverage,
+    EvoMasterConfig,
+    EvoMasterResult,
+    EvoMasterSummary,
     InlineTestSuite,
     MicrocksConfig,
     MicrocksOperationResult,
@@ -50,6 +53,8 @@ def build_result(
             return _microcks(config, contract).model_copy(update=common)
         case MutationConfig():
             return _mutation(config).model_copy(update=common)
+        case EvoMasterConfig():
+            return _evomaster(config, contract).model_copy(update=common)
 
 
 def _schemathesis(config: SchemathesisConfig, contract: LoadedContract) -> SchemathesisResult:
@@ -68,6 +73,23 @@ def _schemathesis(config: SchemathesisConfig, contract: LoadedContract) -> Schem
             errors=0,
         ),
         coverage=_coverage(contract.operations, selected, config.max_examples),
+    )
+
+
+def _evomaster(config: EvoMasterConfig, contract: LoadedContract) -> EvoMasterResult:
+    selected = select_operations(contract.operations, config.operations)
+    return EvoMasterResult(
+        state=ToolState.PASSED,
+        seed=config.seed if config.seed is not None else random.randrange(2**31),
+        summary=EvoMasterSummary(
+            operations_selected=len(selected),
+            tests_generated=len(selected),
+            http_calls_evaluated=config.max_time_s * 100,
+            faults=0,
+            faults_by_category={},
+        ),
+        coverage=_coverage(contract.operations, selected, requests_per_operation=1),
+        generated_tests=[f"EvoMaster_successes_Test.py#test_{i}" for i in range(len(selected))],
     )
 
 

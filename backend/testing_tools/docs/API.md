@@ -12,7 +12,12 @@
 |----------------|-------------------------------------------------------------------------|----------------------------------------|
 | `schemathesis` | Property-based фаззинг по контракту (baseline-инструмент)               | Contract Coverage, Fault Detection     |
 | `microcks`     | Contract-тесты по `examples` из контракта (baseline-инструмент)         | Contract Coverage, Fault Detection     |
-| `mutation`     | Мутационное тестирование **тестов агента** через мутирующий прокси       | Runnability, Mutation Score            |
+| `mutation`     | Запуск и мутационное тестирование **тестов агента** через мутирующий прокси | Runnability, Mutation Score, Test Suite Size, покрытие тестами агента |
+| `evomaster`    | Эволюционный поиск по контракту (EvoMaster black-box), глубже и дольше Schemathesis | Contract Coverage, Fault Detection     |
+
+Выбор по ситуации (как в дизайн-документе): `schemathesis` — быстрая проверка по
+умолчанию, `evomaster` — глубокий поиск по запросу, `microcks` — проверка по примерам
+контракта, `mutation` — оценка тестов агента (с `max_mutants=0` — просто их запуск).
 
 Источник истины по схемам — Pydantic-модели в
 [`src/testing_tools/api/schemas.py`](../src/testing_tools/api/schemas.py).
@@ -80,7 +85,9 @@ run при этом всё равно `completed`.
 
 1. Провалидировать тело по схеме → `422 validation_error`.
 2. Загрузить контракт (`url`) → `422 contract_unreachable`.
-3. Разобрать контракт как OpenAPI 3.x → `422 contract_invalid`.
+3. Разобрать контракт как OpenAPI 3.x → `422 contract_invalid`. Проверяется: JSON или
+   YAML, корень — объект, `openapi: 3.*`, `info.title` и `info.version`, раздел `paths`
+   (объект) и хотя бы одна HTTP-операция в нём. `detail` говорит, что именно не так.
 4. Проверить, что запрошенные инструменты доступны → `503 tool_unavailable`.
 5. Для `mutation` с `kind=inline` — что `files` не пустой и пути относительные,
    без `..` → `422 test_suite_invalid`.
@@ -188,6 +195,33 @@ Microcks сам ходит в `target.base_url`, поэтому адрес до�
 Microcks. В находках Microcks `request.url` — шаблон пути (`/pets/{petId}`): Microcks
 не отдаёт итоговый URL запроса.
 
+#### `evomaster`
+
+EvoMaster 6.x в black-box режиме (`java -jar evomaster.jar --blackBox true`). Нужен
+`TT_EVOMASTER_JAR`, иначе инструмент недоступен (`503`).
+
+| Поле                    | Тип               | По умолчанию | Маппинг на EvoMaster      |
+|-------------------------|-------------------|--------------|---------------------------|
+| `max_time_s`            | int, 10..3600     | `60`         | `--maxTime`               |
+| `seed`                  | int \| null       | случайный    | `--seed`                  |
+| `schema_oracles`        | bool              | `true`       | `--schemaOracles`         |
+| `disabled_oracle_codes` | `list[int]`       | `[]`         | `--disabledOracleCodes` (коды WFC) |
+| `rate_per_minute`       | int \| null       | `null`       | `--ratePerMinute`         |
+| `operations`            | `OperationFilter \| null` | `null` | применяется к контракту до запуска |
+
+- Контракт передаётся с выбранными операциями, параметры уровня пути копируются в
+  каждую операцию (EvoMaster их не поддерживает), `servers` указывает на `target.base_url`.
+- `target.headers` → `--header0..2`; больше трёх заголовков → `error` (`tool_failed`).
+- Время работы — примерно `max_time_s` плюс минимизация и запись тестов (обычно секунды).
+- Находки берутся из WFC-отчёта (`report.json`, Web Fuzzing Commons). `Finding.check` —
+  идентификатор категории WFC в нижнем регистре (`http_status_500`,
+  `schema_invalid_response`, ...), в `message` — уточнение EvoMaster и id теста,
+  воспроизводящего дефект. `request`/`response` не заполняются — запрос есть в тесте.
+- Сгенерированные EvoMaster тесты (Python unittest + requests) — в артефакте
+  `evomaster-tests.zip`, их список — в `generated_tests`.
+- Для API без авторизации имеет смысл `disabled_oracle_codes: [308]` («анонимные
+  изменения»): иначе каждая операция записи отмечается как проблема безопасности.
+
 #### `mutation`
 
 Оценка качества **тестов, сгенерированных агентом** (ТЗ: операторы мутации на уровне
@@ -229,6 +263,13 @@ Microcks. В находках Microcks `request.url` — шаблон пути (
 
 Детали реализации, важные для агента:
 
+- `max_mutants: 0` — только baseline: тесты запускаются один раз, без мутаций. Так агент
+  проверяет, что тесты запускаются, и получает причины падений (например, в цикле
+  самокоррекции); Mutation Score при этом `0`.
+- Доверенные фикстуры среды: в каждый прогон подключается плагин с фикстурами
+  `base_url` (адрес тестируемого сервиса через прокси) и `http_client`
+  (`httpx.Client` на этот адрес). Тестам не нужен свой `conftest.py`; одноимённые
+  фикстуры из `conftest.py` набора имеют приоритет.
 - `replace_status_code`: 2xx/3xx → 500, 4xx/5xx → 200; ответ `default` не мутируется.
 - Поля берутся из JSON-схемы ответа (с `$ref` и `allOf`, до 4 уровней вложенности).
   В `Mutant.location` элемент массива обозначается `*`: `/*/id` — поле `id` в каждом
@@ -242,6 +283,23 @@ Microcks. В находках Microcks `request.url` — шаблон пути (
   TCP-соединения только к адресу из `base_url_env`. Любое другое соединение падает с
   `PermissionError`, и тест получает `failed`/`error`. Тесты должны ходить в сервис только
   через `base_url_env`.
+- Причина падения каждого теста (`TestCaseResult.cause`) — эвристика по типу исключения:
+  - `infrastructure` — сервис недоступен: ошибки соединения и таймауты httpx/requests,
+    а также 502 от прокси, если тот не достучался до сервиса;
+  - `test_error` — ошибка тестового кода: падение в setup/teardown (фикстуры), ошибки
+    сбора, `NameError`, `ImportError`, `TypeError`, `AttributeError` и т. п., обращение
+    в обход `base_url`;
+  - `service_defect` — тест дошёл до сервиса и проверка ответа не прошла:
+    `AssertionError`, `KeyError`/`IndexError` (нет ожидаемого поля), `JSONDecodeError`.
+  Тип исключения — в `TestCaseResult.exception`, сводка — в `baseline.failure_causes`.
+- `baseline.status`: `completed`; `collection_errors` — часть файлов не собралась;
+  `no_tests` — pytest не нашёл тестов. Остальные статусы из дизайн-документа:
+  превышение времени — `error` с `timeout`, недоступность стенда — прогон `failed` с
+  `target_unreachable`, прерван — `cancelled`.
+- `coverage` — какие операции и коды ответов контракта затронули тесты агента
+  (по запросам через прокси на baseline).
+- Если у набора есть `requirements`, точные версии пакетов его venv — в артефакте
+  `mutation-requirements.txt`.
 - Если baseline не уложился в `per_mutant_timeout_s`, инструмент завершается с `error`
   (`timeout`); если pytest не смог запустить набор (например, неизвестный флаг в
   `pytest_args`) — `error` с `test_suite_invalid` и хвостом вывода в `details.output_tail`.
@@ -345,10 +403,11 @@ Idempotency-Key: 2f0c1a1e-run-17
 | Поле              | Тип                      | Описание                                     |
 |-------------------|--------------------------|----------------------------------------------|
 | `run_id`, `state`, `created_at`, `started_at`, `finished_at`, `duration_s`, `labels` | | |
-| `contract`        | `ContractInfo \| null`   | `title`, `version`, `openapi_version`, `operations_total`, `sha256` |
+| `contract`        | `ContractInfo \| null`   | `title`, `version`, `openapi_version`, `operations_total`, `sha256`, `source` (URL или `inline`) |
 | `target_base_url` | str                      |                                              |
 | `tools`           | `list[ToolResult]`       | дискриминатор `tool`, порядок как в запросе  |
 | `metrics`         | `RunMetrics`             | сводка метрик по всем инструментам, см. ниже |
+| `environment`     | `dict[str, str]`         | версии Python, testing_tools, Schemathesis, pytest, httpx… — для воспроизводимости |
 | `report`          | `ArtifactRef \| null`    | Markdown-отчёт по прогону (`run-report.md`)  |
 | `error`           | `ErrorInfo \| null`      | при `failed` / `timed_out`                   |
 
@@ -357,9 +416,11 @@ Idempotency-Key: 2f0c1a1e-run-17
 
 | Поле                   | Откуда                                                                 |
 |------------------------|------------------------------------------------------------------------|
-| `contract_coverage`    | доля операций, которые протестировал хотя бы один из `schemathesis`/`microcks` |
+| `contract_coverage`    | доля операций, которые протестировал хотя бы один из `schemathesis`/`microcks`/`evomaster` |
 | `status_code_coverage` | доля задокументированных ответов, которые наблюдал хотя бы один из них |
-| `faults`               | `findings_total`, `by_severity`, `by_tool`, `operations_with_findings` по находкам `schemathesis`/`microcks` |
+| `faults`               | `findings_total`, `by_severity`, `by_tool`, `operations_with_findings` по их находкам |
+| `tests_contract_coverage` | доля операций, которые вызывают тесты агента (`mutation.coverage`) |
+| `tests_status_code_coverage` | доля задокументированных ответов, которые получили тесты агента |
 | `test_suite_size`      | `mutation.baseline.tests_total`                                        |
 | `runnability`          | `mutation.baseline.runnability`                                        |
 | `mutation_score`       | `mutation.summary.mutation_score`                                      |
@@ -507,6 +568,43 @@ Idempotency-Key: 2f0c1a1e-run-17
 }
 ```
 
+### `EvoMasterResult`
+
+```json
+{
+  "tool": "evomaster",
+  "state": "failed",
+  "tool_version": "6.2.0",
+  "duration_s": 61.6,
+  "seed": 1,
+  "summary": {
+    "operations_selected": 5,
+    "tests_generated": 23,
+    "http_calls_evaluated": 56466,
+    "faults": 5,
+    "faults_by_category": {"SCHEMA_INVALID_RESPONSE": 9, "HTTP_STATUS_500": 3}
+  },
+  "coverage": { "...": "ContractCoverage по запросам из тестов EvoMaster" },
+  "findings": [
+    {"id": "em-1a2b3c4d5e", "tool": "evomaster", "check": "http_status_500", "severity": "critical",
+     "operation": {"method": "POST", "path": "/orders/{orderId}/cancel", "operation_id": "cancelOrder"},
+     "title": "HTTP Status 500",
+     "message": "HTTP Status 500 (EvoMaster test EvoMaster_faults_Test.py#test_3_post_on_cancel_showsFaults_100_200)",
+     "request": null, "response": null, "reproduce": null}
+  ],
+  "generated_tests": ["EvoMaster_faults_Test.py#test_0_get_on_order_returnsMismatchResponseWithSchema"],
+  "artifacts": [
+    {"name": "evomaster-report.json", "media_type": "application/json", "...": "..."},
+    {"name": "evomaster-tests.zip", "media_type": "application/zip", "...": "..."},
+    {"name": "evomaster-output.log", "media_type": "text/plain", "...": "..."}
+  ]
+}
+```
+
+Severity по коду WFC: `critical` — 100 (HTTP 500) и инъекции/обход авторизации
+(300–302, 307, 311); `high` — 200 (ответ не по схеме), 206, 113, 114, 121, 122, 303–306,
+309, 310; `medium` — остальные 1xx/2xx, 308, 312.
+
 ### `MutationResult`
 
 ```json
@@ -517,6 +615,7 @@ Idempotency-Key: 2f0c1a1e-run-17
   "error": null,
   "seed": 42,
   "baseline": {
+    "status": "completed",
     "tests_total": 40,
     "passed": 36,
     "failed": 3,
@@ -524,12 +623,14 @@ Idempotency-Key: 2f0c1a1e-run-17
     "skipped": 0,
     "collection_errors": [],
     "runnability": 0.9,
+    "failure_causes": {"service_defect": 3, "test_error": 1},
     "duration_s": 7.8,
     "tests": [
-      {"node_id": "tests/test_pets.py::test_list_pets", "outcome": "passed", "duration_s": 0.04, "message": null},
-      {"node_id": "tests/test_pets.py::test_create_pet_invalid", "outcome": "failed", "duration_s": 0.05, "message": "assert 400 == 422"}
+      {"node_id": "tests/test_pets.py::test_list_pets", "outcome": "passed", "duration_s": 0.04, "message": null, "cause": null, "exception": null},
+      {"node_id": "tests/test_pets.py::test_create_pet_invalid", "outcome": "failed", "duration_s": 0.05, "message": "assert 400 == 422", "cause": "service_defect", "exception": "AssertionError"}
     ]
   },
+  "coverage": { "...": "ContractCoverage по запросам тестов агента" },
   "summary": {
     "mutants_total": 120,
     "killed": 81,
@@ -637,5 +738,7 @@ Content-Type: application/problem+json
   testing_tools (сейчас не предусмотрен — сервисы считаются разнесёнными).
 - Webhook по завершению прогона вместо поллинга — не предусмотрен, можно добавить
   `callback_url` в `RunCreateRequest` без ломки контракта.
-- EvoMaster / RESTler как дополнительные baseline — добавляются новым членом
-  `ToolConfig` / `ToolResult` с новым значением `tool`.
+- RESTler и другие инструменты добавляются новым членом `ToolConfig` / `ToolResult`
+  с новым значением `tool`, как EvoMaster.
+- Swagger 2.0 («допускается» в дизайн-документе) не поддерживается: контракт должен
+  быть OpenAPI 3.x.
