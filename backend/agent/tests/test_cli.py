@@ -168,6 +168,18 @@ def test_invalid_agent_timeout_rejected(arguments, value):
     assert error.value.code == 2
 
 
+def test_evomaster_requires_room_in_tools_timeout(arguments, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "invoke_agent", lambda *a, **k: pytest.fail("no run"))
+    with pytest.raises(SystemExit) as error:
+        cli.main(
+            arguments
+            + ["--tools-url", "http://tools.test/api/v1", "--tools", "evomaster"]
+            + ["--tools-timeout", "60"]
+        )
+    assert error.value.code == 2
+    assert "--tools-timeout" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("value", ["0", "-1", "1.5", "nan"])
 def test_invalid_step_limit_rejected(arguments, value):
     with pytest.raises(SystemExit) as error:

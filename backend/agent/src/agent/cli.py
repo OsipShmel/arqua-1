@@ -125,7 +125,7 @@ def parser() -> argparse.ArgumentParser:
     generate.add_argument(
         "--tools",
         nargs="+",
-        choices=("schemathesis", "microcks"),
+        choices=("schemathesis", "microcks", "evomaster"),
         help="Разрешённые агенту инструменты; по умолчанию schemathesis при --tools-url",
     )
     generate.add_argument(
@@ -442,7 +442,16 @@ def main(argv: list[str] | None = None) -> int:
             and (stream.encoding or "").lower().replace("-", "") != "utf8"
         ):
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
-    args = parser().parse_args(argv)
+    app = parser()
+    args = app.parse_args(argv)
+    if args.command == "generate" and "evomaster" in (args.tools or []):
+        from agent.gateway import EVOMASTER_OVERHEAD_S
+
+        # The shortest EvoMaster search (10 s) must still fit into one tools run.
+        if args.tools_timeout < 10 + EVOMASTER_OVERHEAD_S:
+            app.error(
+                f"для evomaster нужен --tools-timeout не меньше {10 + EVOMASTER_OVERHEAD_S}"
+            )
     if args.command == "doctor":
         from agent.doctor import diagnose
 

@@ -76,9 +76,20 @@ uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8
 ```
 
 По умолчанию при gateway разрешён только Schemathesis. Агент получает
-`run_api_checks(tool_name="schemathesis", max_examples=50)`; Microcks должен быть
-настроен на сервере. EvoMaster не поддерживается. Разрешение tool не гарантирует,
-что модель его вызовет.
+`run_api_checks(tool_name="schemathesis", max_examples=50, max_time_s=60)`; Microcks должен быть
+настроен на сервере. Разрешение tool не гарантирует, что модель его вызовет.
+
+EvoMaster разрешается через `--tools evomaster` и требует сервис из ветки
+`WiP/testing-tools` с `TT_EVOMASTER_JAR` (в Docker-образе уже есть). Агент задаёт
+бюджет поиска `max_time_s` (10–3600 секунд); после поиска EvoMaster ещё около минуты
+минимизирует и сохраняет тесты, поэтому должно выполняться
+`max_time_s + 60 <= --tools-timeout`, иначе вызов отклоняется до обращения к сервису.
+При стандартном `--tools-timeout 120` доступно до 60 секунд поиска. `--agent-timeout`
+должен вмещать все tools-прогоны агента:
+
+```bash
+uv run --locked arqa-testgen generate openapi.yaml --base-url http://petstore:8080 --tools-url http://localhost:8000/api/v1 --tools schemathesis evomaster --tools-timeout 300 --agent-timeout 600
+```
 
 Протокол клиента соответствует develop:
 

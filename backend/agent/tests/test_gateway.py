@@ -10,13 +10,14 @@ from agent.gateway import ToolsGateway
 RUN_ID = "11111111-1111-4111-8111-111111111111"
 
 
-def gateway(tmp_path):
+def gateway(tmp_path, **options):
     return ToolsGateway(
         {
             "url": "http://tools.test/api/v1",
             "contract": {"openapi": "3.1.0"},
             "target": "http://target.test",
             "directory": str(tmp_path),
+            **options,
         },
         Journal(tmp_path / "events.jsonl", "local-run"),
     )
@@ -129,3 +130,46 @@ def test_gateway_rejects_unselected_tool_before_network(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="не разрешён"):
         gateway(tmp_path).run("microcks")
+
+
+def test_gateway_sends_evomaster_time_budget(tmp_path, monkeypatch):
+    def handler(request):
+        if request.method == "POST":
+            body = json.loads(request.content)
+            assert body["tools"] == [{"tool": "evomaster", "max_time_s": 30}]
+            assert body["timeout_s"] == 120
+            return httpx.Response(202, json={"run_id": RUN_ID})
+        if request.url.path.endswith("/result"):
+            return httpx.Response(
+                200,
+                json={
+                    "run_id": RUN_ID,
+                    "state": "completed",
+                    "tools": [
+                        {
+                            "tool": "evomaster",
+                            "state": "failed",
+                            "summary": {"tests_generated": 3, "faults": 2},
+                            "findings": [{"title": "HTTP Status 500"}],
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(200, json={"state": "completed"})
+
+    install_transport(monkeypatch, handler)
+    client = gateway(tmp_path, tools=["evomaster"])
+    compact = json.loads(client.run("evomaster", max_time_s=30))
+    assert compact["tools"][0]["summary"]["faults"] == 2
+    assert client.outcome()["execution"]["state"] == "failed"
+
+
+@pytest.mark.parametrize(("max_time_s", "match"), [(5, "от 10"), (61, "tools-timeout")])
+def test_gateway_rejects_evomaster_budget_before_network(
+    tmp_path, monkeypatch, max_time_s, match
+):
+    monkeypatch.setattr(
+        httpx, "Client", lambda **_: pytest.fail("network must not start")
+    )
+    with pytest.raises(ValueError, match=match):
+        gateway(tmp_path, tools=["evomaster"]).run("evomaster", max_time_s=max_time_s)

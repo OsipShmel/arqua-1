@@ -16,6 +16,9 @@ from agent.events import Journal, atomic_json
 from agent.results import safe_relative_path
 
 TERMINAL = {"completed", "failed", "cancelled", "timed_out"}
+SUPPORTED_TOOLS = ("schemathesis", "microcks", "evomaster")
+# EvoMaster minimizes and writes its tests after the search budget runs out.
+EVOMASTER_OVERHEAD_S = 60
 
 
 class ToolsGateway:
@@ -32,14 +35,24 @@ class ToolsGateway:
         self.runs: list[dict] = []
         self.artifacts: list[dict] = []
 
-    def run(self, name: str, max_examples: int = 50) -> str:
-        if name not in self.allowed or name not in {"schemathesis", "microcks"}:
+    def run(self, name: str, max_examples: int = 50, max_time_s: int = 60) -> str:
+        if name not in self.allowed or name not in SUPPORTED_TOOLS:
             raise ValueError("Этот инструмент не разрешён параметрами запуска")
         if not 1 <= max_examples <= 10_000:
             raise ValueError("max_examples должен быть от 1 до 10000")
         config = {"tool": name}
         if name == "schemathesis":
             config["max_examples"] = max_examples
+        if name == "evomaster":
+            if not 10 <= max_time_s <= 3600:
+                raise ValueError("max_time_s должен быть от 10 до 3600")
+            if max_time_s + EVOMASTER_OVERHEAD_S > self.timeout:
+                raise ValueError(
+                    f"max_time_s={max_time_s} не помещается в срок tools-прогона "
+                    f"{self.timeout} с: нужно max_time_s + {EVOMASTER_OVERHEAD_S} <= "
+                    "--tools-timeout"
+                )
+            config["max_time_s"] = max_time_s
         payload = {
             "contract": {
                 "kind": "inline",
@@ -196,10 +209,16 @@ class ToolsGateway:
     def as_tools(self):
         @tool
         def run_api_checks(
-            tool_name: str = "schemathesis", max_examples: int = 50
+            tool_name: str = "schemathesis",
+            max_examples: int = 50,
+            max_time_s: int = 60,
         ) -> str:
-            """Запустить разрешённый Schemathesis или Microcks через tools API и получить компактный результат."""
-            return self.run(tool_name, max_examples)
+            """Запустить разрешённый Schemathesis, Microcks или EvoMaster через tools API и получить компактный результат.
+
+            max_examples задаёт число примеров Schemathesis, max_time_s — бюджет поиска
+            EvoMaster в секундах (вместе с 60 с на минимизацию не больше срока tools-прогона).
+            """
+            return self.run(tool_name, max_examples, max_time_s)
 
         return [run_api_checks]
 

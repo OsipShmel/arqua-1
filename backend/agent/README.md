@@ -9,7 +9,7 @@ CLI принимает OpenAPI-контракт из локального JSON/Y
 Агент самостоятельно выбирает и вызывает tools; CLI к tools-сервису не обращается.
 
 **Текущее состояние:** без `--tools-url` используются демо-tools. При подключении
-отдельно запущенного HTTP-сервиса из `develop` агент вызывает Schemathesis/Microcks.
+отдельно запущенного HTTP-сервиса из `develop` агент вызывает Schemathesis/Microcks/EvoMaster.
 Статус `success` относится к вызову агента; результаты проверок — в `execution`.
 Генератора pytest/self-repair ещё нет; CLI готов сохранять возвращённые генератором файлы.
 Подробный интерфейс: [INTEGRATION.md](docs/INTEGRATION.md),
@@ -113,7 +113,7 @@ uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8
 | `--source-max-chars` | Бюджет JSON-списка исходных фрагментов, по умолчанию 24000 |
 | `--summary-max-chars` | Предел summary в символах, по умолчанию 100000 |
 | `--tools-url` | Базовый URL tools API с `/api/v1`; клиент работает в агенте |
-| `--tools` | Разрешённые schemathesis/microcks; без списка при gateway — schemathesis |
+| `--tools` | Разрешённые schemathesis/microcks/evomaster; без списка при gateway — schemathesis |
 | `--tools-timeout` | Срок удалённого прогона, по умолчанию 120 секунд |
 | `--help`, `--version` | Справка и версия, работают без ключей модели |
 

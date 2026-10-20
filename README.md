@@ -6,8 +6,8 @@ ARQA-1 развивается как система генерации и про
 
 **Текущее состояние:** CLI подключён к агенту и поддерживает два режима.
 Без `--tools-url` работают демонстрационные tools. С `--tools-url` агент обращается
-к HTTP-сервису testing_tools из ветки `develop` и получает результаты Schemathesis
-или Microcks. Сам CLI tools не вызывает. Дополнительно принимается Python/FastAPI-код,
+к HTTP-сервису testing_tools из ветки `develop` и получает результаты Schemathesis,
+Microcks или EvoMaster (EvoMaster — сервис из `WiP/testing-tools`). Сам CLI tools не вызывает. Дополнительно принимается Python/FastAPI-код,
 сохраняются manifest, журнал и данные об использовании LLM.
 
 Генератора pytest и self-repair пока нет. CLI уже умеет сохранять файлы, которые
@@ -140,8 +140,8 @@ run_qa_agent(task: str, *, max_steps: int = 25, telemetry=None, gateway=None) ->
 | `run_contract_fuzzing(spec_path, target_url)` | Фаззинг по OpenAPI | Возвращает сообщение `[DEMO]`, фаззинг не запускает |
 
 Эти два tools используются по умолчанию без внешнего сервиса. При `--tools-url`
-агент получает вместо них `run_api_checks(tool_name, max_examples)` для разрешённых
-Schemathesis/Microcks. По умолчанию разрешён Schemathesis; список задаётся `--tools`.
+агент получает вместо них `run_api_checks(tool_name, max_examples, max_time_s)` для разрешённых
+Schemathesis/Microcks/EvoMaster. По умолчанию разрешён Schemathesis; список задаётся `--tools`.
 Сервис запускается отдельно из `develop`: пакет testing_tools в самой `model`
 по-прежнему является старой заготовкой, и его не следует принимать за HTTP-сервис.
 
@@ -282,7 +282,9 @@ uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8
 ```
 
 Действительность HTTP-адреса не означает доступность конкретного инструмента:
-Microcks должен быть настроен на сервере. `tool_mode: "external"` подтверждает
+Microcks должен быть настроен на сервере, для EvoMaster нужен `TT_EVOMASTER_JAR`
+и `--tools-timeout` не меньше бюджета поиска плюс 60 секунд
+([подробнее](backend/agent/docs/INTEGRATION.md#tools-api-из-develop)). `tool_mode: "external"` подтверждает
 обращение через внешний API; его реальный или stub-режим определяется настройками сервера.
 
 `--base-url` — адрес тестируемого сервиса. Он отличается от `DEEPCODE_BASE_URL`,
@@ -303,7 +305,7 @@ Microcks должен быть настроен на сервере. `tool_mode:
 | `--source-max-chars` | `24000` | Бюджет JSON-списка отобранных файлов и фрагментов исходников |
 | `--summary-max-chars` | `100000` | Максимальный размер summary; превышение явно останавливает запуск |
 | `--tools-url` | Не задан | Полный базовый адрес tools API, включая `/api/v1` |
-| `--tools` | `schemathesis` при gateway | Разрешённые tools: `schemathesis`, `microcks` |
+| `--tools` | `schemathesis` при gateway | Разрешённые tools: `schemathesis`, `microcks`, `evomaster` |
 | `--tools-timeout` | `120` | Срок одного tools-прогона; целое число от 10 до 86400 секунд |
 | `--help` | — | Справка, доступна также для `doctor` и `generate` |
 | `--version` | — | Версия установленного пакета агента |
@@ -568,7 +570,7 @@ Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запуска
 - бюджет summary задаётся в символах, без оценки токенов; слишком большой summary
   отклоняется явно, операции не удаляются молча;
 - исходники обогащают контекст, но не устанавливаются в исполнительную среду автоматически;
-- EvoMaster, генерация цепочек user story и расчёт стоимости LLM не реализованы;
+- генерация цепочек user story и расчёт стоимости LLM не реализованы;
 - остановка локального агента не является протоколом отмены удалённых tools;
 - качество ответа реальной LLM требует отдельной проверки с выбранным провайдером.
 
@@ -577,5 +579,5 @@ Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запуска
 1. Настроить модель с поддержкой tool calling и проверить ручной запуск.
 2. Развернуть согласованный tools-сервис и проверить Microcks на командном стенде.
 3. Использовать AgentResult v1 для реализации генератора pytest и классификации его ошибок.
-4. Подключить генератор и self-repair, адаптер EvoMaster и требуемые user story.
+4. Подключить генератор и self-repair и требуемые user story.
 5. Добавить проверки реального сценария: контракт → агент → генерация → исполнение → отчёт.
