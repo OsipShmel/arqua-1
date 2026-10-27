@@ -2,7 +2,7 @@
 name = "openapi-parser"
 version = "0.1.0"
 description = "Parser for OpenAPI 3.x contracts (file or URL) with an LLM-friendly summary"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 dependencies = [
     "pydantic>=2.7,<3.0",
     "pyyaml>=6.0,<7.0",
