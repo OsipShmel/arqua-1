@@ -7,5 +7,6 @@ dependencies = []
 [tool.uv.workspace]
 members = [
     "backend/agent",
+    "backend/openapi-parser",
     "backend/testing_tools",
 ]
