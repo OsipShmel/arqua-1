@@ -38,6 +38,44 @@ def test_path_item_ref_is_counted_and_summarized(tmp_path):
     assert "x-path" not in context.summary()
 
 
+def test_recursive_schema_survives_official_parser_and_agent_summary(tmp_path):
+    document = {
+        **SPEC,
+        "paths": {
+            "/nodes": {
+                "get": {
+                    "responses": {
+                        "200": {
+                            "description": "OK",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/Node"}
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        },
+        "components": {
+            "schemas": {
+                "Node": {
+                    "type": "object",
+                    "properties": {"child": {"$ref": "#/components/schemas/Node"}},
+                }
+            }
+        },
+    }
+    source = tmp_path / "tree.json"
+    source.write_text(json.dumps(document), encoding="utf-8")
+    context = read_contract(str(source))
+    parsed = context.contract.operations[0].responses["200"].content["application/json"]
+    assert parsed.properties["child"].ref == "#/components/schemas/Node"
+    assert context.summary()["schemas"]["#/components/schemas/Node"]["properties"][
+        "child"
+    ] == {"schema_ref": "#/components/schemas/Node"}
+
+
 def test_yaml_api_dates_and_enum_words_keep_their_json_types(tmp_path):
     source = tmp_path / "dates.yaml"
     source.write_text(

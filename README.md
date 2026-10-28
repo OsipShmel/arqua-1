@@ -14,12 +14,15 @@ Microcks или EvoMaster (EvoMaster — сервис из `WiP/testing-tools`).
 вернёт будущий генератор через структурированный интерфейс. `success` означает
 успешный вызов агента; фактический результат проверок находится в `execution` и `tool_runs`.
 
-Реализацию проверяют **88 автоматических тестов**. Они проверяют сам проект,
+Реализацию проверяют **100 автоматических тестов CLI и parser**. Они проверяют сам проект,
 включая интеграцию CLI с настоящим LangChain-циклом через локальный имитатор LLM.
 Это не тесты, сгенерированные агентом для пользовательского API.
 
+Ветка объединена с актуальным `develop`; [инструкция для команды](backend/agent/docs/TEAM_INTEGRATION.md)
+описывает структуру пакетов, проверенный запуск и оставшуюся работу генератора.
+
 [Проверки GitHub Actions](https://github.com/OsipShmel/arqua-1/actions/workflows/cli.yml)
-запускаются на Windows и Linux с Python 3.11 и 3.14.
+запускаются на Windows и Linux с Python 3.13 и 3.14.
 
 ## Содержание
 
@@ -142,16 +145,16 @@ run_qa_agent(task: str, *, max_steps: int = 25, telemetry=None, gateway=None) ->
 Эти два tools используются по умолчанию без внешнего сервиса. При `--tools-url`
 агент получает вместо них `run_api_checks(tool_name, max_examples, max_time_s)` для разрешённых
 Schemathesis/Microcks/EvoMaster. По умолчанию разрешён Schemathesis; список задаётся `--tools`.
-Сервис запускается отдельно из `develop`: пакет testing_tools в самой `model`
-по-прежнему является старой заготовкой, и его не следует принимать за HTTP-сервис.
+Ветка `model` объединена с `develop`: HTTP-сервис находится в `backend/testing_tools`,
+официальный parser — в `backend/openapi-parser`. Сервис запускается отдельным процессом
+или через Docker Compose. EvoMaster пока требует сервер из `WiP/testing-tools`.
 
 ## Установка
 
 ### Основной вариант: uv workspace
 
-Для всего workspace нужен **Python 3.14+**, Git и установленный `uv`.
-Пакеты `agent` и `arqa-openapi-parser` отдельно допускают Python 3.11+;
-корневой проект и `testing-tools` требуют 3.14.
+Для workspace нужен **Python 3.13+**, Git и установленный `uv`.
+CLI использует официальный пакет `openapi-parser` из того же workspace.
 
 Для нового клона:
 
@@ -167,18 +170,18 @@ uv run --locked arqa-testgen --version
 Установка использует `uv.lock`, включает parser и зависимости для разработки.
 Справка и версия работают без настроенной модели.
 
-### Отдельная установка CLI на Python 3.11+
+### Отдельная установка CLI на Python 3.13+
 
-В отдельном активированном виртуальном окружении Python 3.11+ из корня репозитория:
+В отдельном активированном виртуальном окружении Python 3.13+ из корня репозитория:
 
 ```bash
-python -m pip install -e ./openapi_parser_project -e './backend/agent[dev]'
+python -m pip install -e ./backend/openapi-parser -e './backend/agent[dev]'
 python -m agent --help
 ```
 
 Здесь устанавливаются только CLI, агент и parser, без корневого workspace.
 Для этой установки используйте `arqa-testgen` или `python -m agent`, а для тестов —
-`python -m pytest`. `uv run --locked` из корня относится к workspace с Python 3.14+.
+`python -m pytest`. `uv run --locked` из корня относится к общему workspace.
 
 ### Если uv запускается по полному пути
 
@@ -254,7 +257,7 @@ URL провайдера, температура, таймаут и наличи
 Контракт из репозитория:
 
 ```bash
-uv run --locked arqa-testgen generate openapi_parser_project/examples/pets.yaml --base-url http://localhost:8080
+uv run --locked arqa-testgen generate backend/openapi-parser/examples/pets.yaml --base-url http://localhost:8080
 ```
 
 Контракт по URL и машиночитаемый результат:
@@ -266,7 +269,7 @@ uv run --locked arqa-testgen generate http://localhost:8080/openapi.json --base-
 С ограничениями выполнения:
 
 ```bash
-uv run --locked arqa-testgen generate openapi_parser_project/examples/pets.yaml --base-url http://localhost:8080 --agent-timeout 120 --max-steps 15
+uv run --locked arqa-testgen generate backend/openapi-parser/examples/pets.yaml --base-url http://localhost:8080 --agent-timeout 120 --max-steps 15
 ```
 
 С Python/FastAPI-кодом сервиса (папка `./service` должна существовать):
@@ -415,12 +418,16 @@ report = json.loads(Path("runs/<run-id>/report.json").read_text(encoding="utf-8"
 ### Автоматические тесты без ключа модели
 
 ```bash
-uv run --locked --package agent pytest backend/agent/tests openapi_parser_project/tests -q
+uv run --locked --package agent --extra dev python -m pytest backend/agent/tests backend/openapi-parser/tests -q
 ```
 
-В текущей версии ожидается `88 passed`. Тесты используют временные контракты,
+Все выбранные проверки должны завершиться без ошибок. Тесты используют временные контракты,
 локальный HTTP-сервер и тестовые настройки, поэтому не обращаются к внешней LLM
 и не требуют настоящего API-ключа.
+
+После полной установки workspace набор включает настоящий HTTP-сервис `testing_tools`
+и Schemathesis: проверяется обнаружение ошибки схемы ответа и сохранение JUnit.
+При отдельной установке только CLI этот тест пропускается без пакета `testing-tools`.
 
 На Windows при недоступном `%TEMP%\pytest-of-<user>` используйте новую папку
 для каждого прогона. Эта команда проверена на компьютере разработчика:
@@ -428,13 +435,13 @@ uv run --locked --package agent pytest backend/agent/tests openapi_parser_projec
 ```powershell
 New-Item -ItemType Directory -Path .pytest-tmp -Force | Out-Null
 $testTemp = Join-Path (Get-Location).Path ('.pytest-tmp/' + [guid]::NewGuid().ToString('N'))
-uv run --locked --package agent pytest backend/agent/tests openapi_parser_project/tests -q --basetemp $testTemp
+uv run --locked --package agent --extra dev python -m pytest backend/agent/tests backend/openapi-parser/tests -q --basetemp $testTemp
 ```
 
 При использовании переменной с путём к uv замените последнюю строку на:
 
 ```powershell
-& $uv run --locked --package agent pytest backend/agent/tests openapi_parser_project/tests -q --basetemp $testTemp
+& $uv run --locked --package agent --extra dev python -m pytest backend/agent/tests backend/openapi-parser/tests -q --basetemp $testTemp
 ```
 
 `.pytest-tmp/` исключён из Git. pytest очищает указанный `--basetemp` перед запуском,
@@ -465,25 +472,24 @@ uv run --locked --package agent pytest backend/agent/tests openapi_parser_projec
 ### Lint, форматирование и CI
 
 ```bash
-uv run --locked --package agent ruff check backend/agent/src backend/agent/tests
-uv run --locked --package agent ruff format --check backend/agent/src backend/agent/tests
+uv run --locked --package agent --extra dev ruff check backend/agent/src backend/agent/tests
+uv run --locked --package agent --extra dev ruff format --check backend/agent/src backend/agent/tests
 ```
 
 Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запускается на push
-и pull request. Матрица: `ubuntu-latest` / `windows-latest` × Python 3.11 / 3.14.
-На 3.14 устанавливается workspace по `uv.lock`; на 3.11 — только CLI и parser
-с зависимостями для разработки, поскольку весь workspace требует 3.14.
-Таким образом, проверка 3.11 тестирует совместимость отдельного пакета и допускаемых
-им зависимостей, а не воспроизведение корневого lock-файла. Секреты LLM в CI не нужны.
+и pull request. Матрица: `ubuntu-latest` / `windows-latest` × Python 3.13 / 3.14.
+В каждом задании устанавливается общий workspace по `uv.lock`.
+Секреты LLM в CI не нужны.
+Отдельное задание собирает Docker-образ tools, проверяя согласованность COPY и workspace.
 
 ## Демонстрация проекта
 
 Для демонстрации преподавателю или команде:
 
 1. Показать `arqa-testgen --help` и поддерживаемые параметры.
-2. Запустить автоматические тесты и показать `88 passed`.
+2. Запустить автоматические тесты и показать успешный результат.
 3. Настроить действительного провайдера и выполнить `doctor`.
-4. Запустить `generate` на `openapi_parser_project/examples/pets.yaml`.
+4. Запустить `generate` на `backend/openapi-parser/examples/pets.yaml`.
 5. Открыть полученные `report.json` и `report.md`: источник, число операций,
    результат агента, режим, лимиты и состояние запуска.
 6. Для полного HTTP-сценария запустить tools-сервис из `develop`, передать `--tools-url`
@@ -499,7 +505,7 @@ Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запуска
 > Реализован CLI для ARQA-1: ввод OpenAPI из файла или URL, подготовка задания и вызов
 > LangChain-агента, ограничения времени и шагов, обработка ошибок и отчёты JSON/Markdown.
 > Агент самостоятельно управляет tools. Добавлена локальная диагностика настроек,
-> 88 автоматических тестов и CI на Windows/Linux с Python 3.11/3.14. CLI принимает
+> автоматические тесты и CI на Windows/Linux с Python 3.13/3.14. CLI принимает
 > Python-контекст, готовит summary, сохраняет manifest и журнал. Агент умеет работать
 > с существующим tools API; генерация pytest и self-repair остаются следующим этапом.
 
@@ -508,12 +514,12 @@ Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запуска
 ```text
 .
 ├── README.md                           # Руководство по текущей реализации
-├── pyproject.toml                      # uv workspace, Python 3.14+
+├── pyproject.toml                      # uv workspace, Python 3.13+
 ├── uv.lock                             # Зафиксированные зависимости workspace
 ├── .github/workflows/cli.yml            # Матрица тестов и Ruff
 ├── backend/
 │   ├── agent/
-│   │   ├── pyproject.toml               # Пакет agent, Python 3.11+, console script
+│   │   ├── pyproject.toml               # Пакет agent, Python 3.13+, console script
 │   │   ├── .env.example                 # Шаблон настроек модели
 │   │   ├── README.md                    # Интерфейс и устройство пакета агента
 │   │   ├── src/agent/
@@ -533,11 +539,12 @@ Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запуска
 │   │   │   ├── model.py                 # Настройки и фабрика ChatOpenAI
 │   │   │   └── agent.py                 # LangChain-агент и DEMO tools
 │   │   └── tests/                       # CLI, модель, контракты и интеграция
-│   └── testing_tools/                   # Отдельный пакет tools в workspace
-└── openapi_parser_project/
-    ├── openapi_parser/                  # Командный parser и модели
-    ├── examples/pets.yaml               # Контракт для ручного запуска
-    └── tests/                           # Проверки parser
+│   ├── openapi-parser/
+│   │   ├── src/openapi_parser/          # Официальный parser и модели
+│   │   ├── examples/pets.yaml           # Контракт для ручного запуска
+│   │   └── tests/                      # Проверки parser
+│   └── testing_tools/                   # HTTP-сервис tools из develop
+└── docker-compose.yml                  # Tools, Microcks, демонстрационные API
 ```
 
 ## Частые проблемы
@@ -545,7 +552,7 @@ Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запуска
 | Симптом | Что проверить или сделать |
 | --- | --- |
 | `uv` не найден | Установить uv или вызвать существующий `uv.exe` по полному пути |
-| Workspace не запускается на Python 3.11 | Для workspace использовать 3.14+; для 3.11 установить CLI и parser отдельно |
+| Workspace не запускается на старом Python | Использовать Python 3.13+ и обновить окружение через uv |
 | `doctor`: отсутствуют `DEEPCODE_*` | Заполнить три обязательные настройки и проверить расположение `.env` |
 | `doctor` успешен, но модель недоступна | Он проверяет локальные настройки; проверить настоящий адрес, ключ, модель и поддержку tools |
 | `[warning] tools` | Без --tools-url инструменты демонстрационные; doctor не проверяет внешний сервис |

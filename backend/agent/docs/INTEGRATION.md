@@ -65,9 +65,11 @@ manifest — его пути и хеши. Выбирайте исходники,
 
 ## Tools API из develop
 
-Новый HTTP-сервис testing_tools разворачивается отдельно из `develop` по
+HTTP-сервис testing_tools и официальный parser включены из `develop` в `model`.
+Структура — `backend/testing_tools`, `backend/openapi-parser` и `backend/agent`.
+Сервис разворачивается отдельным процессом или через Compose по
 [DEMO.md](https://github.com/OsipShmel/arqua-1/blob/develop/DEMO.md).
-Старый пакет testing_tools в `model` не заменяется автоматически.
+Старый `openapi_parser_project` удалён; зависимости, тесты и lock используют `openapi-parser`.
 
 Из рабочей копии CLI:
 
@@ -81,10 +83,11 @@ uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8
 
 EvoMaster разрешается через `--tools evomaster` и требует сервис из ветки
 `WiP/testing-tools` с `TT_EVOMASTER_JAR` (в Docker-образе уже есть). Агент задаёт
-бюджет поиска `max_time_s` (10–3600 секунд); после поиска EvoMaster ещё около минуты
-минимизирует и сохраняет тесты, поэтому должно выполняться
-`max_time_s + 60 <= --tools-timeout`, иначе вызов отклоняется до обращения к сервису.
-При стандартном `--tools-timeout 120` доступно до 60 секунд поиска. `--agent-timeout`
+бюджет поиска `max_time_s` (10–3600 секунд). Сервер ограничивает процесс временем
+`2 * max_time_s + 120`; клиент оставляет ещё 10 секунд для получения результатов.
+Должно выполняться `2 * max_time_s + 130 <= --tools-timeout`, иначе вызов отклоняется
+до обращения к сервису. Стандартный `--tools-timeout 120` для EvoMaster недостаточен;
+для стандартного поиска 60 секунд укажите не меньше 250, например 300. `--agent-timeout`
 должен вмещать все tools-прогоны агента:
 
 ```bash
@@ -203,3 +206,10 @@ usage, имя tool, ограниченный результат и ID удалё
 `ad2d5dce4d0e9b8febf0c8cd84120e84fa847898`: stub-сервис и настоящий Schemathesis 4.32.0
 на локальном FastAPI с дефектами. LLM заменяла локальная имитация. Запуск Microcks
 и оценка качества настоящего провайдера в эту проверку не входили.
+
+После объединения с develop `61fbfaf` на Windows проверены 100 тестов CLI и parser
+на Python 3.13 и 3.14. Новый `test_workspace_integration.py` запускает настоящий
+HTTP-сервис из текущего workspace и Schemathesis против API с неверным типом `id`.
+Он подтверждает находку `response_schema_conformance`, возврат результата модели
+и сохранение JUnit. Только LLM в этом сценарии является локальным имитатором.
+Полный запуск Microcks и EvoMaster здесь не проверяется.

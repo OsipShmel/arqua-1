@@ -445,12 +445,12 @@ def main(argv: list[str] | None = None) -> int:
     app = parser()
     args = app.parse_args(argv)
     if args.command == "generate" and "evomaster" in (args.tools or []):
-        from agent.gateway import EVOMASTER_OVERHEAD_S
+        from agent.gateway import evomaster_timeout
 
-        # The shortest EvoMaster search (10 s) must still fit into one tools run.
-        if args.tools_timeout < 10 + EVOMASTER_OVERHEAD_S:
+        # The shortest search must fit the server limit and result transfer.
+        if args.tools_timeout < evomaster_timeout(10):
             app.error(
-                f"для evomaster нужен --tools-timeout не меньше {10 + EVOMASTER_OVERHEAD_S}"
+                f"для evomaster нужен --tools-timeout не меньше {evomaster_timeout(10)}"
             )
     if args.command == "doctor":
         from agent.doctor import diagnose

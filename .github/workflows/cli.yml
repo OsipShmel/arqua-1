@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ['3.11', '3.14']
+        python: ['3.13', '3.14']
     env:
       LANGSMITH_TRACING: 'false'
       LANGCHAIN_TRACING_V2: 'false'
@@ -26,17 +26,20 @@ jobs:
         with:
           version: '0.13.0'
           python-version: ${{ matrix.python }}
-      - name: Install locked workspace (Python 3.14)
-        if: matrix.python == '3.14'
-        run: uv sync --locked --all-packages --all-extras
-      - name: Install standalone CLI (Python 3.11)
-        if: matrix.python == '3.11'
-        run: |
-          uv venv --python 3.11
-          uv pip install -e ./openapi_parser_project -e './backend/agent[dev]'
+      - name: Install locked workspace
+        run: uv sync --locked --all-packages --all-extras --python ${{ matrix.python }}
       - name: Test CLI and parser
-        run: uv run --no-project python -m pytest backend/agent/tests openapi_parser_project/tests -q
+        run: uv run --no-project python -m pytest backend/agent/tests backend/openapi-parser/tests -q
       - name: Lint CLI
         run: uv run --no-project ruff check backend/agent/src backend/agent/tests
       - name: Check formatting
         run: uv run --no-project ruff format --check backend/agent/src backend/agent/tests
+
+  tools-image:
+    name: Tools Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build tools with the shared workspace
+        run: docker build -f backend/testing_tools/Dockerfile -t arqa-tools:check .

@@ -17,8 +17,13 @@ from agent.results import safe_relative_path
 
 TERMINAL = {"completed", "failed", "cancelled", "timed_out"}
 SUPPORTED_TOOLS = ("schemathesis", "microcks", "evomaster")
-# EvoMaster minimizes and writes its tests after the search budget runs out.
-EVOMASTER_OVERHEAD_S = 60
+# Match the process limit in WiP/testing-tools, then allow result transfer.
+EVOMASTER_OVERHEAD_S = 120
+RESULT_TRANSFER_S = 10
+
+
+def evomaster_timeout(search_s: int) -> int:
+    return 2 * search_s + EVOMASTER_OVERHEAD_S + RESULT_TRANSFER_S
 
 
 class ToolsGateway:
@@ -46,10 +51,11 @@ class ToolsGateway:
         if name == "evomaster":
             if not 10 <= max_time_s <= 3600:
                 raise ValueError("max_time_s должен быть от 10 до 3600")
-            if max_time_s + EVOMASTER_OVERHEAD_S > self.timeout:
+            if evomaster_timeout(max_time_s) > self.timeout:
                 raise ValueError(
                     f"max_time_s={max_time_s} не помещается в срок tools-прогона "
-                    f"{self.timeout} с: нужно max_time_s + {EVOMASTER_OVERHEAD_S} <= "
+                    f"{self.timeout} с: нужно 2 * max_time_s + {EVOMASTER_OVERHEAD_S} "
+                    f"+ {RESULT_TRANSFER_S} <= "
                     "--tools-timeout"
                 )
             config["max_time_s"] = max_time_s
@@ -216,7 +222,7 @@ class ToolsGateway:
             """Запустить разрешённый Schemathesis, Microcks или EvoMaster через tools API и получить компактный результат.
 
             max_examples задаёт число примеров Schemathesis, max_time_s — бюджет поиска
-            EvoMaster в секундах (вместе с 60 с на минимизацию не больше срока tools-прогона).
+            EvoMaster в секундах; общий срок должен вмещать 2 * max_time_s + 130 секунд.
             """
             return self.run(tool_name, max_examples, max_time_s)
 

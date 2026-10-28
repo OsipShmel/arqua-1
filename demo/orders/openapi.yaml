@@ -1,0 +1,199 @@
+openapi: 3.0.3
+info:
+  title: Demo Orders
+  version: 1.0.0
+  description: Demo service for ARQA evaluation. Known defects are listed in demo/README.md.
+paths:
+  /products:
+    get:
+      operationId: listProducts
+      tags: [catalog]
+      responses:
+        "200":
+          description: The catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Product"}
+              examples:
+                catalog:
+                  value:
+                    - {sku: croissant, name: Croissant, price: 2.5, stock: 50}
+                    - {sku: baguette, name: Baguette, price: 3.0, stock: 20}
+                    - {sku: cake, name: Cake, price: 25.0, stock: 0}
+  /products/{sku}:
+    get:
+      operationId: getProduct
+      tags: [catalog]
+      parameters:
+        - name: sku
+          in: path
+          required: true
+          schema: {type: string, pattern: "^[a-z-]{1,32}$"}
+          examples:
+            croissant: {value: croissant}
+            unknown: {value: muffin}
+      responses:
+        "200":
+          description: The product
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Product"}
+              examples:
+                croissant:
+                  value: {sku: croissant, name: Croissant, price: 2.5, stock: 50}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such product
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+              examples:
+                unknown:
+                  value: {detail: product not found}
+  /orders:
+    post:
+      operationId: createOrder
+      tags: [orders]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewOrder"}
+            examples:
+              two-baguettes:
+                value: {items: [{sku: baguette, quantity: 2}]}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+              examples:
+                two-baguettes:
+                  value: {id: 3, status: new, items: [{sku: baguette, quantity: 2}], total: 6.0}
+        "404":
+          description: Unknown product in the order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "409":
+          description: Not enough stock
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "422":
+          description: Invalid order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      tags: [orders]
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: The order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+              examples:
+                first:
+                  value: {id: 1, status: new, items: [{sku: croissant, quantity: 2}], total: 5.0}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+              examples:
+                missing:
+                  value: {detail: order not found}
+  /orders/{orderId}/cancel:
+    post:
+      operationId: cancelOrder
+      tags: [orders]
+      parameters:
+        - $ref: "#/components/parameters/OrderId"
+      responses:
+        "200":
+          description: The cancelled order; its items go back to stock
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Order"}
+              examples:
+                second:
+                  value: {id: 2, status: cancelled, items: [{sku: baguette, quantity: 1}], total: 3.0}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such order
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "409":
+          description: The order is already cancelled
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+components:
+  parameters:
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema: {type: integer, minimum: 1}
+      examples:
+        first: {value: 1}
+        second: {value: 2}
+        missing: {value: 999}
+  responses:
+    BadRequest:
+      description: Invalid parameters
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    Product:
+      type: object
+      required: [sku, name, price, stock]
+      properties:
+        sku: {type: string}
+        name: {type: string}
+        price: {type: number, minimum: 0}
+        stock: {type: integer, minimum: 0}
+    OrderItem:
+      type: object
+      required: [sku, quantity]
+      properties:
+        sku: {type: string}
+        quantity: {type: integer, minimum: 1, maximum: 100}
+    NewOrder:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items: {$ref: "#/components/schemas/OrderItem"}
+    Order:
+      type: object
+      required: [id, status, items, total]
+      properties:
+        id: {type: integer}
+        status: {type: string, enum: [new, cancelled]}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/OrderItem"}
+        total: {type: number, minimum: 0}
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail: {type: string}

@@ -17,19 +17,19 @@ CLI принимает OpenAPI-контракт из локального JSON/Y
 
 ## Установка
 
-Из корня репозитория, с Python 3.14 и uv:
+Из корня репозитория, с Python 3.13+ и uv:
 
 ```bash
 uv sync --locked --all-packages --all-extras
 uv run --locked arqa-testgen --help
 ```
 
-Пакет агента допускает Python 3.11+, но корневой workspace требует 3.14.
-Parser теперь является отдельным пакетом workspace и устанавливается автоматически.
+Агент и официальный parser требуют Python 3.13+.
+Parser расположен в `backend/openapi-parser` и устанавливается из workspace автоматически.
 Для установки без uv в своём виртуальном окружении:
 
 ```bash
-python -m pip install -e ./openapi_parser_project -e ./backend/agent
+python -m pip install -e ./backend/openapi-parser -e ./backend/agent
 ```
 
 ## Интерфейс агентной части
@@ -169,9 +169,9 @@ JSON содержит статус вызова, времена, SHA-256 исх�
 ## Проверки
 
 ```bash
-uv run --locked --package agent pytest backend/agent/tests openapi_parser_project/tests -q
-uv run --locked --package agent ruff check backend/agent/src backend/agent/tests
-uv run --locked --package agent ruff format --check backend/agent/src backend/agent/tests
+uv run --locked --package agent --extra dev python -m pytest backend/agent/tests backend/openapi-parser/tests -q
+uv run --locked --package agent --extra dev ruff check backend/agent/src backend/agent/tests
+uv run --locked --package agent --extra dev ruff format --check backend/agent/src backend/agent/tests
 ```
 
 Если Windows сообщает `PermissionError` для `%TEMP%\pytest-of-<user>`, используйте
@@ -181,7 +181,7 @@ pytest без изменения его прав или удаления чуж�
 ```powershell
 New-Item -ItemType Directory -Path .pytest-tmp -Force | Out-Null
 $testTemp = Join-Path (Get-Location).Path ('.pytest-tmp/' + [guid]::NewGuid().ToString('N'))
-uv run --locked --package agent pytest backend/agent/tests openapi_parser_project/tests -q --basetemp $testTemp
+uv run --locked --package agent --extra dev python -m pytest backend/agent/tests backend/openapi-parser/tests -q --basetemp $testTemp
 ```
 
 Если uv задан переменной с путём к исполняемому файлу, замените `uv` на `& $uv`.
@@ -197,6 +197,5 @@ OpenAI-клиент против локального сценарного HTTP-
 ключа, локальная диагностика `doctor` и сохранность OpenAPI-контекста.
 
 Workflow `.github/workflows/cli.yml` запускает тесты, lint и проверку форматирования
-на Windows и Linux с Python 3.11 и 3.14. Для 3.14 используется workspace с `uv.lock`;
-для 3.11 отдельно устанавливаются пакеты CLI и parser, поскольку корневой workspace
-и пакет testing-tools требуют 3.14. LLM-ключи в CI не нужны.
+на Windows и Linux с Python 3.13 и 3.14. В каждом задании используется общий
+workspace с `uv.lock`. LLM-ключи в CI не нужны.

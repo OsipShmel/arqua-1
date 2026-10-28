@@ -1,0 +1,132 @@
+openapi: 3.0.3
+info:
+  title: Demo Petstore
+  version: 1.0.0
+  description: Demo service for ARQA evaluation. Known defects are listed in demo/README.md.
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+          examples:
+            first:
+              value: 1
+      responses:
+        "200":
+          description: Pets, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: "#/components/schemas/Pet"}
+              examples:
+                first:
+                  value: [{id: 1, name: rex, tag: dog, status: available}]
+        "400":
+          $ref: "#/components/responses/BadRequest"
+    post:
+      operationId: createPet
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/NewPet"}
+            examples:
+              tom:
+                value: {name: tom, tag: cat}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Pet"}
+              examples:
+                tom:
+                  value: {id: 3, name: tom, tag: cat, status: available}
+        "422":
+          description: Invalid pet
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+  /pets/{petId}:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema: {type: integer, minimum: 1}
+        examples:
+          rex: {value: 1}
+          missing: {value: 999}
+    get:
+      operationId: getPet
+      tags: [pets]
+      responses:
+        "200":
+          description: The pet
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Pet"}
+              examples:
+                rex:
+                  value: {id: 1, name: rex, tag: dog, status: available}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deletePet
+      tags: [pets]
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: No such pet
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+              examples:
+                missing:
+                  value: {detail: pet not found}
+components:
+  responses:
+    BadRequest:
+      description: Invalid parameters
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: No such pet
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+          examples:
+            missing:
+              value: {detail: pet not found}
+  schemas:
+    NewPet:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 50}
+        tag: {type: string, maxLength: 20}
+    Pet:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: {type: integer}
+        name: {type: string}
+        tag: {type: string}
+        status: {type: string, enum: [available, sold]}
+    Error:
+      type: object
+      required: [detail]
+      properties:
+        detail: {type: string}

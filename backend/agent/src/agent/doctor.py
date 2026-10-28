@@ -16,12 +16,12 @@ def diagnose() -> dict:
 
     record(
         "python",
-        "ok" if sys.version_info >= (3, 11) else "error",
-        f"Python {sys.version.split()[0]}; требуется 3.11+",
+        "ok" if sys.version_info >= (3, 13) else "error",
+        f"Python {sys.version.split()[0]}; требуется 3.13+",
     )
     for package in (
         "agent",
-        "arqa-openapi-parser",
+        "openapi-parser",
         "langchain",
         "langchain-core",
         "langchain-openai",
@@ -55,7 +55,11 @@ def diagnose() -> dict:
             if Path(certificate).is_file()
             else "Файл SSL_CERT_FILE не найден",
         )
-    record("tools", "warning", "Tools демонстрационные; реальные тесты не выполняются")
+    record(
+        "tools",
+        "warning",
+        "Без --tools-url используются демо-tools; доступность внешнего сервиса не проверялась",
+    )
     return {
         "status": "error" if any(c["status"] == "error" for c in checks) else "ok",
         "network_checked": False,

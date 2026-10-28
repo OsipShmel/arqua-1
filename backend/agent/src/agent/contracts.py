@@ -11,6 +11,7 @@ from pathlib import Path
 import httpx
 import yaml
 from openapi_parser import OpenAPIContract, OpenAPIParser
+from openapi_parser.parser import OpenAPIParseError
 
 from agent.summary import Summarizer, summarize
 
@@ -133,7 +134,10 @@ def read_contract(source: str, timeout: float = 10.0) -> ContractContext:
                 if str(p).startswith("/")
             },
         }
-    contract = OpenAPIParser().parse(parser_document)
+    try:
+        contract = OpenAPIParser().parse(parser_document)
+    except OpenAPIParseError as exc:
+        raise ValueError(str(exc)) from exc
     contract.raw = document
     if not contract.operations:
         raise ValueError("В контракте нет HTTP-операций для анализа")
