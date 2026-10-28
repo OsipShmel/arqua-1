@@ -103,6 +103,52 @@ def test_gateway_cancels_run_when_polling_fails(tmp_path, monkeypatch):
     assert ("POST", f"/api/v1/runs/{RUN_ID}/cancel") in paths
 
 
+def test_gateway_skips_oversized_artifacts_but_keeps_the_run(tmp_path, monkeypatch):
+    requested = []
+
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(202, json={"run_id": RUN_ID})
+        if request.url.path.endswith("/result"):
+            return httpx.Response(
+                200,
+                json={
+                    "run_id": RUN_ID,
+                    "state": "completed",
+                    "tools": [
+                        {
+                            "tool": "schemathesis",
+                            "state": "failed",
+                            "artifacts": [
+                                # Real Schemathesis HAR/NDJSON reach tens of MB.
+                                {"name": "schemathesis.har", "size_bytes": 30_000_000},
+                                {"name": "events.ndjson"},
+                                {"name": "junit.xml", "size_bytes": 13},
+                            ],
+                        }
+                    ],
+                },
+            )
+        if "/artifacts/" in request.url.path:
+            requested.append(request.url.path.rsplit("/", 1)[-1])
+            if request.url.path.endswith("/events.ndjson"):
+                return httpx.Response(200, content=b"x" * 200)
+            return httpx.Response(200, content=b"<testsuites/>")
+        return httpx.Response(200, json={"state": "completed"})
+
+    install_transport(monkeypatch, handler)
+    monkeypatch.setattr("agent.gateway.ARTIFACT_BUDGET", 100)
+    client = gateway(tmp_path)
+    compact = json.loads(client.run("schemathesis"))
+    # The declared size is checked before downloading; the undeclared one by bytes.
+    assert requested == ["junit.xml", "events.ndjson"]
+    assert compact["artifacts_skipped"] == ["events.ndjson", "schemathesis.har"]
+    assert [Path(a["path"]).name for a in client.artifacts] == ["junit.xml"]
+    skipped = client.outcome()["execution"]["skipped_artifacts"]
+    assert {s["name"] for s in skipped} == {"schemathesis.har", "events.ndjson"}
+    assert not list(tmp_path.rglob("events.ndjson"))
+
+
 def test_gateway_rejects_artifact_traversal(tmp_path, monkeypatch):
     def handler(request):
         if request.method == "POST":

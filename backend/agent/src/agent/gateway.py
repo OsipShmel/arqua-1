@@ -22,6 +22,9 @@ EVOMASTER_OVERHEAD_S = 120
 RESULT_TRANSFER_S = 10
 
 
+ARTIFACT_BUDGET = 10_000_000  # bytes downloaded per tools run; larger files are skipped
+
+
 def evomaster_timeout(search_s: int) -> int:
     return 2 * search_s + EVOMASTER_OVERHEAD_S + RESULT_TRANSFER_S
 
@@ -39,6 +42,7 @@ class ToolsGateway:
         self.journal = journal
         self.runs: list[dict] = []
         self.artifacts: list[dict] = []
+        self.skipped_artifacts: list[dict] = []
 
     def run(self, name: str, max_examples: int = 50, max_time_s: int = 60) -> str:
         if name not in self.allowed or name not in SUPPORTED_TOOLS:
@@ -109,7 +113,15 @@ class ToolsGateway:
                 ]
                 if result.get("report"):
                     references.append(result["report"])
-                saved, size = set(), 0
+                saved, size, skipped = set(), 0, []
+                # Smallest first, so one huge raw log (HAR/NDJSON) cannot crowd out the reports.
+                references.sort(
+                    key=lambda i: (
+                        i["size_bytes"]
+                        if isinstance(i.get("size_bytes"), int)
+                        else ARTIFACT_BUDGET
+                    )
+                )
                 for item in references:
                     artifact_name = item["name"]
                     relative = safe_relative_path(artifact_name)
@@ -121,21 +133,38 @@ class ToolsGateway:
                     if artifact_name.casefold() in saved:
                         continue
                     saved.add(artifact_name.casefold())
-                    # Construct the endpoint ourselves; never follow a URL supplied in a result.
-                    with client.stream(
-                        "GET",
-                        f"runs/{run_id}/artifacts/{quote(artifact_name, safe='')}",
-                        timeout=self._remaining(deadline),
-                    ) as response:
-                        response.raise_for_status()
-                        chunks = []
-                        for chunk in response.iter_bytes():
-                            size += len(chunk)
-                            if size > 10_000_000:
-                                raise ValueError(
-                                    "Артефакты tools превышают лимит 10 MB"
-                                )
-                            chunks.append(chunk)
+                    declared = item.get("size_bytes")
+                    over_budget = isinstance(declared, int) and (
+                        size + declared > ARTIFACT_BUDGET
+                    )
+                    if not over_budget:
+                        # Construct the endpoint ourselves; never follow a URL supplied in a result.
+                        with client.stream(
+                            "GET",
+                            f"runs/{run_id}/artifacts/{quote(artifact_name, safe='')}",
+                            timeout=self._remaining(deadline),
+                        ) as response:
+                            response.raise_for_status()
+                            chunks, received = [], 0
+                            for chunk in response.iter_bytes():
+                                received += len(chunk)
+                                # The declared size is advisory; the byte count is the limit.
+                                if size + received > ARTIFACT_BUDGET:
+                                    over_budget = True
+                                    break
+                                chunks.append(chunk)
+                    if over_budget:
+                        # The file stays on the tools service; the run itself is not lost.
+                        skipped.append(
+                            {
+                                "name": artifact_name,
+                                "size_bytes": declared,
+                                "tools_run_id": run_id,
+                                "reason": "size_limit",
+                            }
+                        )
+                        continue
+                    size += received
                     path = folder / artifact_name
                     path.write_bytes(b"".join(chunks))
                     self.artifacts.append(
@@ -161,6 +190,14 @@ class ToolsGateway:
                         | {"findings": result_tool.get("findings", [])[:10]}
                     )
                 compact["error"] = result.get("error")
+                if skipped:
+                    self.skipped_artifacts.extend(skipped)
+                    compact["artifacts_skipped"] = [s["name"] for s in skipped]
+                    self.journal.emit(
+                        "gateway.artifacts_skipped",
+                        tools_run_id=run_id,
+                        names=compact["artifacts_skipped"],
+                    )
                 self.journal.emit(
                     "gateway.finished",
                     tool=name,
@@ -268,5 +305,6 @@ class ToolsGateway:
                     }
                     for r in self.runs
                 ],
+                "skipped_artifacts": self.skipped_artifacts,
             },
         }
