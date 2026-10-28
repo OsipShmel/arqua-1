@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Microcks contract test over its REST API: upload the contract, launch a test, poll, collect."""
 
 import asyncio
