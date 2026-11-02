@@ -14,7 +14,7 @@ Microcks или EvoMaster (EvoMaster — сервис из `WiP/testing-tools`).
 вернёт будущий генератор через структурированный интерфейс. `success` означает
 успешный вызов агента; фактический результат проверок находится в `execution` и `tool_runs`.
 
-Реализацию проверяют **100 автоматических тестов CLI и parser**. Они проверяют сам проект,
+Реализацию проверяет **101 автоматический тест CLI и parser**. Они проверяют сам проект,
 включая интеграцию CLI с настоящим LangChain-циклом через локальный имитатор LLM.
 Это не тесты, сгенерированные агентом для пользовательского API.
 
@@ -22,7 +22,10 @@ Microcks или EvoMaster (EvoMaster — сервис из `WiP/testing-tools`).
 описывает структуру пакетов, проверенный запуск и оставшуюся работу генератора.
 
 [Проверки GitHub Actions](https://github.com/OsipShmel/arqua-1/actions/workflows/cli.yml)
-запускаются на Windows и Linux с Python 3.13 и 3.14.
+запускаются на Windows, Linux и macOS с Python 3.13 и 3.14.
+
+Для показа преподавателю на Mac есть [готовая демонстрация](backend/agent/docs/MACOS_DEMO.md):
+настоящие CLI и Schemathesis, локальный имитатор LLM, без Docker и API-ключа.
 
 ## Содержание
 
@@ -477,7 +480,7 @@ uv run --locked --package agent --extra dev ruff format --check backend/agent/sr
 ```
 
 Workflow [`.github/workflows/cli.yml`](.github/workflows/cli.yml) запускается на push
-и pull request. Матрица: `ubuntu-latest` / `windows-latest` × Python 3.13 / 3.14.
+и pull request. Матрица: `ubuntu-latest` / `windows-latest` / `macos-latest` × Python 3.13 / 3.14.
 В каждом задании устанавливается общий workspace по `uv.lock`.
 Секреты LLM в CI не нужны.
 Отдельное задание собирает Docker-образ tools, проверяя согласованность COPY и workspace.
