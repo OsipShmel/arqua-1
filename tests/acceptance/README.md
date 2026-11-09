@@ -1,0 +1,73 @@
+# Приёмочные тесты по ПМИ
+
+Автотесты по контрольным примерам «ПМИ ARQA-1, Приложение А» — по файлу на пример:
+`test_a01_….py` … `test_a25_….py`. В docstring каждого файла — шаги и ожидаемый
+результат из ПМИ. Итоги по примерам — [docs/pmi-report.md](../../docs/pmi-report.md).
+
+## Запуск
+
+Из корня репозитория (после `uv sync --locked --all-packages --all-extras`):
+
+```bash
+uv run --locked pytest
+```
+
+Около 3–4 минут: внутри по-настоящему работают Schemathesis, pytest-прогоны мутантов и
+HTTP-серверы. Ключ модели, Docker и интернет не нужны.
+
+Один пример: `uv run --locked pytest tests/acceptance/test_a08_coverage_and_causes.py`.
+
+### В Docker
+
+```bash
+docker compose -f docker-compose.yml -f tests/docker/compose.yml --profile test run --rm tests
+```
+
+Поднимает стенд из `docker-compose.yml` (testing_tools, Microcks, Petstore, Orders) и
+контейнер тестов в той же сети ([tests/docker](../docker)). В контейнере workspace
+ставится из `uv.lock` на чистом Linux, затем `tests/docker/run-all.sh` гоняет все
+наборы: CLI и parser, testing_tools, mypy, ruff и эту приёмку. Стендовые тесты
+`test_stand_docker.py` (маркер `stand`) работают только здесь: они ходят в настоящие
+контейнеры, а не в сервисы, поднятые в процессе теста.
+
+Настоящая модель — переменные с хоста: `ARQA_LLM_TESTS=1`, `DEEPCODE_*`; для Ollama на
+хосте — `ARQA_OLLAMA_MODEL` и `ARQA_OLLAMA_URL=http://host.docker.internal:11434/v1`.
+
+Перед повторным замером FDR перезапустите демо-сервисы: `docker compose restart
+petstore orders` — их данные меняются инструментами.
+
+## Как читать результат
+
+| Итог pytest | Значение |
+|---|---|
+| `passed` | требование ПМИ выполняется |
+| `xfailed` | известный пробел: функции нет или она неполная; причина — в `reason` маркера |
+| `skipped` | нужен внешний ресурс (модель, Microcks, Ollama), его не задали |
+| `failed` | регрессия, либо пробел закрыли и `xfail(strict=True)` пора снять |
+
+Посмотреть, почему именно падает пробел: `uv run --locked pytest --runxfail -k <имя>`.
+
+## Стенд
+
+Всё поднимается в процессе теста на `127.0.0.1` ([conftest.py](conftest.py)):
+
+- **сценарная LLM** — OpenAI-совместимый сервер, отвечает по заданному сценарию
+  (`tool_call(...)`, `answer(...)`) и записывает каждый запрос: что модели отправили,
+  какие инструменты предложили, что вернули инструменты;
+- **демо-сервисы** `demo/petstore`, `demo/orders` — свежий экземпляр на каждый тест;
+- **testing_tools** — `create_app(Settings(...))`, результаты во временном каталоге;
+- **CLI** `arqa-testgen` — настоящий, подпроцессом, в пустом рабочем каталоге.
+
+## Внешние ресурсы
+
+| Маркер | Что нужно | Как включить |
+|---|---|---|
+| `llm` | настоящая модель | `ARQA_LLM_TESTS=1` и `DEEPCODE_*` в окружении или в корневом `.env` |
+| `ollama` | локальная модель | `ARQA_OLLAMA_MODEL=<имя>`; адрес — `ARQA_OLLAMA_URL` (по умолчанию `http://127.0.0.1:11434/v1`) |
+| `stand` | Docker-стенд | только внутри контейнера тестов (`ARQA_STAND=1`) |
+| `docker` | запущенный Microcks | `ARQA_MICROCKS_URL=http://localhost:8585`; демо-сервис должен быть доступен из контейнера (`ARQA_TARGET_HOST`; по умолчанию `host.docker.internal`, а внутри стенда — адрес контейнера тестов) |
+
+Microcks можно поднять из compose: `docker compose up -d microcks`.
+
+Тесты с маркером `llm` тратят токены провайдера: каждый — один прогон агента на
+демо-контракте, до 40 шагов графа.

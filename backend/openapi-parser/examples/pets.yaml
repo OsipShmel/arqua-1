@@ -1,0 +1,121 @@
+openapi: 3.0.3
+
+info:
+  title: Pet API
+  version: 1.0.0
+  description: Simple API for pets
+
+servers:
+  - url: https://api.example.com/v1
+
+paths:
+
+  /pets:
+    get:
+      operationId: getPets
+      summary: Get pets
+
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pet"
+
+        "400":
+          description: Invalid request
+
+    post:
+      operationId: createPet
+      summary: Create pet
+
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePet"
+
+      responses:
+        "201":
+          description: Pet created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+
+  /pets/{petId}:
+
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+
+    get:
+      operationId: getPet
+      summary: Get pet by ID
+
+      responses:
+        "200":
+          description: Pet found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pet"
+
+        "404":
+          description: Pet not found
+
+
+components:
+
+  schemas:
+
+    Pet:
+      type: object
+      required:
+        - id
+        - name
+
+      properties:
+        id:
+          type: integer
+          minimum: 1
+
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+
+        status:
+          type: string
+          enum:
+            - available
+            - pending
+            - sold
+
+    CreatePet:
+      type: object
+      required:
+        - name
+
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100

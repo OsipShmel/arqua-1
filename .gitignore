@@ -3,6 +3,8 @@
 .env
 .yamlenv
 .secret
+runs/
+*.superpowers/
 
 ### Python template
 # Byte-compiled / optimized / DLL files
@@ -60,6 +62,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+.pytest-tmp/
 cover/
 
 # Translations
@@ -172,3 +175,8 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 .idea/
 
+
+# testing_tools run results (TT_RESULTS_DIR)
+results/
+# reports saved by examples/run_demo.py
+backend/testing_tools/examples/report-*.md

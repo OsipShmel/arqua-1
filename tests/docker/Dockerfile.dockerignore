@@ -1,0 +1,13 @@
+# Unlike the root .dockerignore, .git stays: the secrets check reads tracked files.
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.pytest-tmp
+**/.mypy_cache
+**/.ruff_cache
+**/runs
+**/results
+**/.env
+**/.DS_Store
+.idea

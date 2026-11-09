@@ -1,0 +1,35 @@
+# Local stand: testing_tools + Microcks + two demo services with known defects.
+#   docker compose up --build
+# Agent -> http://localhost:8000/api/v1, demo services as targets:
+#   http://petstore:8080  (contract: http://petstore:8080/openapi.yaml)
+#   http://orders:8080    (contract: http://orders:8080/openapi.yaml)
+services:
+  testing-tools:
+    build:
+      context: .
+      dockerfile: backend/testing_tools/Dockerfile
+    ports: ["8000:8000"]
+    environment:
+      TT_MICROCKS_URL: http://microcks:8080
+    volumes:
+      - tt-results:/data
+    depends_on: [microcks, petstore, orders]
+
+  microcks:
+    image: quay.io/microcks/microcks-uber:latest
+    ports: ["8585:8080"]
+
+  petstore:
+    build:
+      context: demo
+      args: {SERVICE: petstore}
+    ports: ["18081:8080"]
+
+  orders:
+    build:
+      context: demo
+      args: {SERVICE: orders}
+    ports: ["18082:8080"]
+
+volumes:
+  tt-results:

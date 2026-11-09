@@ -1,0 +1,9 @@
+**/.venv
+**/__pycache__
+**/.pytest_cache
+**/.pytest-tmp
+**/runs
+**/.mypy_cache
+**/results
+**/.env
+.git

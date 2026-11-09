@@ -1,11 +1,24 @@
 [project]
 name = "arqua-1"
 version = "0.1.0"
-requires-python = ">=3.14"
-dependencies = []
+requires-python = ">=3.13"
+dependencies = ["agent", "openapi-parser", "testing-tools"]
+
+[tool.uv.sources]
+agent = { workspace = true }
+openapi-parser = { workspace = true }
+testing-tools = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "backend/agent",
+    "backend/openapi-parser",
     "backend/testing_tools",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+# Root runs the ПМИ acceptance suite; each package keeps its own tests (see README).
+testpaths = ["tests/acceptance"]
