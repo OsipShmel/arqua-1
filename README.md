@@ -102,6 +102,8 @@ uv run --locked arqa-testgen generate http://localhost:18081/openapi.yaml \
 `report.status = success` значит, что агент отработал, а `execution.state` — что
 показали проверки (`failed` = найдены дефекты).
 
+Пошаговый сценарий показа с настоящими выводами — [docs/walkthrough.md](docs/walkthrough.md).
+
 Без Docker и ключа: `uv run --locked python backend/agent/examples/demo_cli.py` —
 настоящие CLI, testing_tools и Schemathesis, модель заменена локальным сценарием
 ([подробнее](backend/agent/docs/MACOS_DEMO.md)). Демонстрация самого testing_tools —
@@ -146,6 +148,7 @@ demo/                     демо-сервисы с известными деф
 tests/acceptance/         приёмочные тесты по ПМИ
 docs/pmi-report.md        отчёт о готовности по ПМИ
 docs/known-issues.md      известные дефекты компонентов
+docs/walkthrough.md       сценарий ручного показа
 tests/docker/             прогон всех тестов в Docker на стенде
 docker-compose.yml        стенд: testing_tools, Microcks, демо-сервисы
 pyproject.toml, uv.lock   общий workspace и зафиксированные зависимости
