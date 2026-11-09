@@ -43,6 +43,9 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers", "ollama: needs a local Ollama model (ARQA_OLLAMA_MODEL)"
     )
+    config.addinivalue_line(
+        "markers", "stand: runs inside the Docker stand (tests/docker, ARQA_STAND=1)"
+    )
 
 
 def pytest_collection_modifyitems(
@@ -51,7 +54,12 @@ def pytest_collection_modifyitems(
     llm = os.environ.get("ARQA_LLM_TESTS") == "1"
     microcks = bool(os.environ.get("ARQA_MICROCKS_URL"))
     ollama = bool(os.environ.get("ARQA_OLLAMA_MODEL"))
+    stand = os.environ.get("ARQA_STAND") == "1"
     for item in items:
+        if "stand" in item.keywords and not stand:
+            item.add_marker(
+                pytest.mark.skip(reason="Docker stand: run via tests/docker")
+            )
         if "ollama" in item.keywords and not ollama:
             item.add_marker(
                 pytest.mark.skip(reason="local model: set ARQA_OLLAMA_MODEL")

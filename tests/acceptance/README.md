@@ -17,6 +17,25 @@ HTTP-серверы. Ключ модели, Docker и интернет не ну
 
 Один пример: `uv run --locked pytest tests/acceptance/test_a08_coverage_and_causes.py`.
 
+### В Docker
+
+```bash
+docker compose -f docker-compose.yml -f tests/docker/compose.yml --profile test run --rm tests
+```
+
+Поднимает стенд из `docker-compose.yml` (testing_tools, Microcks, Petstore, Orders) и
+контейнер тестов в той же сети ([tests/docker](../docker)). В контейнере workspace
+ставится из `uv.lock` на чистом Linux, затем `tests/docker/run-all.sh` гоняет все
+наборы: CLI и parser, testing_tools, mypy, ruff и эту приёмку. Стендовые тесты
+`test_stand_docker.py` (маркер `stand`) работают только здесь: они ходят в настоящие
+контейнеры, а не в сервисы, поднятые в процессе теста.
+
+Настоящая модель — переменные с хоста: `ARQA_LLM_TESTS=1`, `DEEPCODE_*`; для Ollama на
+хосте — `ARQA_OLLAMA_MODEL` и `ARQA_OLLAMA_URL=http://host.docker.internal:11434/v1`.
+
+Перед повторным замером FDR перезапустите демо-сервисы: `docker compose restart
+petstore orders` — их данные меняются инструментами.
+
 ## Как читать результат
 
 | Итог pytest | Значение |
@@ -45,7 +64,8 @@ HTTP-серверы. Ключ модели, Docker и интернет не ну
 |---|---|---|
 | `llm` | настоящая модель | `ARQA_LLM_TESTS=1` и `DEEPCODE_*` в окружении или в корневом `.env` |
 | `ollama` | локальная модель | `ARQA_OLLAMA_MODEL=<имя>`; адрес — `ARQA_OLLAMA_URL` (по умолчанию `http://127.0.0.1:11434/v1`) |
-| `docker` | запущенный Microcks | `ARQA_MICROCKS_URL=http://localhost:8585`; демо-сервис должен быть доступен из контейнера (`ARQA_TARGET_HOST`, по умолчанию `host.docker.internal`) |
+| `stand` | Docker-стенд | только внутри контейнера тестов (`ARQA_STAND=1`) |
+| `docker` | запущенный Microcks | `ARQA_MICROCKS_URL=http://localhost:8585`; демо-сервис должен быть доступен из контейнера (`ARQA_TARGET_HOST`; по умолчанию `host.docker.internal`, а внутри стенда — адрес контейнера тестов) |
 
 Microcks можно поднять из compose: `docker compose up -d microcks`.
 

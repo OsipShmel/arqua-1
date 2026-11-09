@@ -8,6 +8,8 @@
 """
 
 import os
+import re
+import socket
 from pathlib import Path
 
 import pytest
@@ -38,7 +40,8 @@ DEFECTS = {
             and f["response"]["status_code"] == 500
         ),
         "P3": lambda f: (
-            f["check"] == "response_schema_conformance" and "status" in f["message"]
+            re.search(r"[\"']status[\"']", f["message"]) is not None
+            and "required" in f["message"]
         ),
         "P4": lambda f: (
             f["operation"]["method"] == "DELETE"
@@ -79,7 +82,12 @@ def test_schemathesis_baseline_finds_planted_defects(tmp_path: Path) -> None:
 @pytest.mark.parametrize("service", ["petstore", "orders"])
 def test_microcks_is_the_second_baseline(service: str, tmp_path: Path) -> None:
     # Microcks runs in Docker and calls the target itself, so the target listens on 0.0.0.0.
-    host = os.environ.get("ARQA_TARGET_HOST", "host.docker.internal")
+    host = os.environ.get("ARQA_TARGET_HOST") or (
+        # inside the stand: our own address on the compose network
+        socket.gethostbyname(socket.gethostname())
+        if os.environ.get("ARQA_STAND") == "1"
+        else "host.docker.internal"
+    )
     with serve(demo_app(service), host="0.0.0.0") as local:
         target = f"http://{host}:{port_of(local)}"
         with tools_service(

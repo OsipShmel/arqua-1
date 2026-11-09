@@ -1,0 +1,25 @@
+# Test runner on the stand's network. Paths are relative to the repository root.
+#   docker compose -f docker-compose.yml -f tests/docker/compose.yml --profile test run --rm tests
+# Real model: export ARQA_LLM_TESTS=1 and DEEPCODE_* first (host Ollama: http://host.docker.internal:11434/v1).
+services:
+  tests:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: tests/docker/Dockerfile
+    depends_on: [testing-tools, microcks, petstore, orders]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    environment:
+      ARQA_STAND: "1"
+      ARQA_STAND_TOOLS_URL: http://testing-tools:8000/api/v1
+      ARQA_STAND_PETSTORE: http://petstore:8080
+      ARQA_STAND_ORDERS: http://orders:8080
+      ARQA_MICROCKS_URL: http://microcks:8080
+      # Passed through only when set on the host
+      ARQA_LLM_TESTS:
+      ARQA_OLLAMA_MODEL:
+      ARQA_OLLAMA_URL:
+      DEEPCODE_API_KEY:
+      DEEPCODE_BASE_URL:
+      DEEPCODE_MODEL:
+      DEEPCODE_TIMEOUT:
