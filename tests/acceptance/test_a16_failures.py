@@ -72,10 +72,6 @@ def test_unreachable_llm_address(workdir: Path) -> None:
     assert run.report["error"]["type"] == "OpenAIConnectionError"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="сообщение — голое «Connection error.»: не сказано, что недоступна LLM и по какому адресу",
-)
 def test_unreachable_llm_message_is_clear(workdir: Path) -> None:
     address = f"http://127.0.0.1:{free_port()}/v1"
     run = generate(

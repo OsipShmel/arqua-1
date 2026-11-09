@@ -20,6 +20,19 @@ SECRET_FIELDS = {
 }
 
 
+# Local models take dummy keys such as "local" or "ollama"; cutting those out of every
+# string would corrupt model names and URLs ("localhost" -> "***host"). Such keys are
+# short words ("ollama", "lm-studio", "not-needed"); real provider keys are far longer.
+MIN_SECRET_LENGTH = 12
+
+
+def mask_key(text: str) -> str:
+    key = os.getenv("DEEPCODE_API_KEY")
+    if key and len(key) >= MIN_SECRET_LENGTH:
+        return text.replace(key, "***")
+    return text
+
+
 def redact(value):
     if isinstance(value, dict):
         return {
@@ -29,8 +42,7 @@ def redact(value):
     if isinstance(value, (list, tuple)):
         return [redact(v) for v in value]
     if isinstance(value, str):
-        key = os.getenv("DEEPCODE_API_KEY")
-        return value.replace(key, "***") if key else value
+        return mask_key(value)
     return value
 
 
