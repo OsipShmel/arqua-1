@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -87,10 +87,24 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "agent" },
+    { name = "openapi-parser" },
+    { name = "testing-tools" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "agent", editable = "backend/agent" }]
+requires-dist = [
+    { name = "agent", editable = "backend/agent" },
+    { name = "openapi-parser", editable = "backend/openapi-parser" },
+    { name = "testing-tools", editable = "backend/testing_tools" },
+]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "ast-serialize"
