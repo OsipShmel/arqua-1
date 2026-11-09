@@ -29,6 +29,24 @@ def evomaster_timeout(search_s: int) -> int:
     return 2 * search_s + EVOMASTER_OVERHEAD_S + RESULT_TRANSFER_S
 
 
+# testing_tools ErrorCode -> what it means for the person reading the report.
+CAUSES = {
+    "target_unreachable": "стенд недоступен: тестируемый сервис не отвечает",
+    "tool_unavailable": "инструмент недоступен на сервере testing_tools",
+    "timeout": "превышено время прогона",
+    "tool_failed": "сбой инструмента",
+    "contract_unreachable": "контракт недоступен для testing_tools",
+}
+
+
+def describe_error(exc: Exception) -> str:
+    message = str(exc) or type(exc).__name__
+    if isinstance(exc, httpx.HTTPStatusError):
+        # The service explains a 4xx/5xx in the body (ProblemDetail); keep it bounded.
+        message += f": {exc.response.text[:1000]}"
+    return message
+
+
 class ToolsGateway:
     def __init__(self, options: dict, journal: Journal):
         self.url = http_url(options["url"]).rstrip("/") + "/"
@@ -43,6 +61,7 @@ class ToolsGateway:
         self.runs: list[dict] = []
         self.artifacts: list[dict] = []
         self.skipped_artifacts: list[dict] = []
+        self.tool_errors: list[dict] = []
 
     def run(self, name: str, max_examples: int = 50, max_time_s: int = 60) -> str:
         if name not in self.allowed or name not in SUPPORTED_TOOLS:
@@ -261,7 +280,22 @@ class ToolsGateway:
             max_examples задаёт число примеров Schemathesis, max_time_s — бюджет поиска
             EvoMaster в секундах; общий срок должен вмещать 2 * max_time_s + 130 секунд.
             """
-            return self.run(tool_name, max_examples, max_time_s)
+            try:
+                return self.run(tool_name, max_examples, max_time_s)
+            except Exception as exc:
+                # A failed call is a fact the model can act on (another tool, other
+                # arguments), not the end of the whole agent run.
+                message = describe_error(exc)
+                self.tool_errors.append(
+                    {"tool": tool_name, "type": type(exc).__name__, "message": message}
+                )
+                self.journal.emit(
+                    "gateway.error",
+                    tool=tool_name,
+                    error_type=type(exc).__name__,
+                    message=message,
+                )
+                return f"Ошибка инструмента {tool_name}: {message}"
 
         return [run_api_checks]
 
@@ -269,7 +303,7 @@ class ToolsGateway:
         states = [t.get("state") for r in self.runs for t in r.get("tools", [])]
         failed_run = any(r.get("state") != "completed" for r in self.runs)
         execution_state = (
-            "not_run"
+            ("error" if self.tool_errors else "not_run")
             if not self.runs
             else "error"
             if failed_run or any(s in {"error", "cancelled"} for s in states)
@@ -298,6 +332,8 @@ class ToolsGateway:
                     {
                         "run_id": r.get("run_id"),
                         "state": r.get("state"),
+                        "error": r.get("error"),
+                        "cause": CAUSES.get((r.get("error") or {}).get("code")),
                         "tools": [
                             {k: t[k] for k in ("tool", "state", "error") if k in t}
                             for t in r.get("tools", [])
@@ -305,6 +341,7 @@ class ToolsGateway:
                     }
                     for r in self.runs
                 ],
+                "tool_errors": self.tool_errors,
                 "skipped_artifacts": self.skipped_artifacts,
             },
         }

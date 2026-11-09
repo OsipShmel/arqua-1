@@ -42,11 +42,6 @@ def test_local_openai_compatible_endpoint(workdir: Path) -> None:
     assert run.report["agent"]["output"] == "Локальная модель ответила."
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="маскирование вырезает значение DEEPCODE_API_KEY из любого текста: с типичным для "
-    "локальной модели ключом (local/ollama) портятся имя модели и адрес в отчёте",
-)
 def test_dummy_key_does_not_corrupt_the_report(workdir: Path) -> None:
     with scripted_llm() as llm:
         base_url = llm.base_url.replace("127.0.0.1", "localhost")

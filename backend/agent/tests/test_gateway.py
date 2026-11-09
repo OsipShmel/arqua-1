@@ -221,3 +221,55 @@ def test_gateway_rejects_evomaster_budget_before_network(
         gateway(tmp_path, tools=["evomaster"], timeout=190).run(
             "evomaster", max_time_s=max_time_s
         )
+
+
+def test_tool_error_is_returned_to_the_model(tmp_path, monkeypatch):
+    def handler(request):
+        return httpx.Response(
+            422, json={"code": "validation_error", "message": "unknown tool evomaster"}
+        )
+
+    install_transport(monkeypatch, handler)
+    client = gateway(tmp_path, tools=["schemathesis", "evomaster"], timeout=300)
+    [run_api_checks] = client.as_tools()
+
+    # Disallowed tool: refused before the network, the run goes on.
+    refused = run_api_checks.invoke({"tool_name": "microcks"})
+    # The service rejects the request: its explanation reaches the model.
+    rejected = run_api_checks.invoke({"tool_name": "evomaster", "max_time_s": 10})
+
+    assert "не разрешён" in refused
+    assert "422" in rejected and "unknown tool evomaster" in rejected
+    execution = client.outcome()["execution"]
+    assert execution["state"] == "error"
+    assert [e["tool"] for e in execution["tool_errors"]] == ["microcks", "evomaster"]
+    events = (tmp_path / "events.jsonl").read_text(encoding="utf-8")
+    assert events.count('"gateway.error"') == 2
+
+
+def test_run_level_cause_is_in_execution(tmp_path, monkeypatch):
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(202, json={"run_id": RUN_ID})
+        if request.url.path.endswith("/result"):
+            return httpx.Response(
+                200,
+                json={
+                    "run_id": RUN_ID,
+                    "state": "failed",
+                    "error": {
+                        "code": "target_unreachable",
+                        "message": "http://127.0.0.1:9 refused connection",
+                    },
+                    "tools": [{"tool": "schemathesis", "state": "skipped"}],
+                },
+            )
+        return httpx.Response(200, json={"state": "failed"})
+
+    install_transport(monkeypatch, handler)
+    client = gateway(tmp_path)
+    client.run("schemathesis")
+
+    [run] = client.outcome()["execution"]["runs"]
+    assert run["error"]["code"] == "target_unreachable"
+    assert "недоступен" in run["cause"]

@@ -109,11 +109,6 @@ def test_stopped_service_is_infrastructure_failure(
     assert run.report["execution"]["state"] == "error"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="в отчёте CLI нет явной причины падения: run-level error виден только в tool_runs, "
-    "execution и report.md его не показывают",
-)
 def test_cause_is_visible_in_cli_report(workdir: Path, tmp_path: Path) -> None:
     run, _ = _run(workdir, tmp_path, f"http://127.0.0.1:{free_port()}")
 

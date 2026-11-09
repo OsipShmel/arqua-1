@@ -72,14 +72,10 @@ def test_disallowed_tool_never_runs(workdir: Path, tmp_path: Path) -> None:
     run, _ = _call_disallowed_tool(workdir, tmp_path)
 
     assert run.report["tool_runs"] == [], "microcks was not allowed, nothing may run"
-    assert "не разрешён" in run.report["error"]["message"]
+    [error] = run.report["execution"]["tool_errors"]
+    assert error["tool"] == "microcks" and "не разрешён" in error["message"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="ошибка инструмента (не тот tool, неверные аргументы, 4xx от testing_tools) обрывает весь "
-    "прогон агента вместо ответа модели, чтобы она исправилась",
-)
 def test_tool_error_goes_back_to_the_model(workdir: Path, tmp_path: Path) -> None:
     run, llm = _call_disallowed_tool(workdir, tmp_path)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import sys
 from datetime import datetime, timezone
 from importlib.metadata import version
@@ -13,7 +12,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from agent.contracts import http_url, read_contract
-from agent.events import Journal, atomic_json, redact
+from agent.events import Journal, atomic_json, mask_key, redact
 from agent.manifest import environment_manifest
 from agent.results import AgentResult, save_result_files
 from agent.runner import invoke_agent
@@ -152,11 +151,26 @@ def output_text(content: object) -> str:
 
 
 def error_message(exc: BaseException) -> str:
-    message = str(exc) or type(exc).__name__
-    key = os.getenv("DEEPCODE_API_KEY")
-    if key:
-        message = message.replace(key, "***")
-    return message
+    return mask_key(str(exc) or type(exc).__name__)
+
+
+def tool_run_lines(execution: dict) -> list[str]:
+    """State and failure cause of every tools run, so report.md explains an error."""
+    lines = []
+    for run in execution.get("runs", []):
+        line = f"- Прогон {run.get('run_id')}: {run.get('state')}"
+        tools = ", ".join(
+            f"{t.get('tool')} — {t.get('state')}" for t in run.get("tools", [])
+        )
+        if tools:
+            line += f" ({tools})"
+        if run.get("error"):
+            cause = run.get("cause") or run["error"].get("code")
+            line += f". Причина: {cause}; {run['error'].get('message')}"
+        lines.append(line)
+    for error in execution.get("tool_errors", []):
+        lines.append(f"- Вызов {error['tool']} не выполнен: {error['message']}")
+    return lines
 
 
 def write_reports(directory: Path, report: dict) -> None:
@@ -191,6 +205,9 @@ def write_reports(directory: Path, report: dict) -> None:
             text += f"Зафиксировано токенов: {runtime.get('total_tokens')}; полный учёт: {runtime.get('usage_complete')}.\n"
         else:
             text += "Данные о расходе токенов от провайдера не получены.\n"
+    tool_lines = tool_run_lines(report.get("execution") or {})
+    if tool_lines:
+        text += "\n## Прогоны инструментов\n\n" + "\n".join(tool_lines) + "\n"
     if report.get("metrics") is not None:
         text += (
             "\n## Метрики инструментов\n\n```json\n"
