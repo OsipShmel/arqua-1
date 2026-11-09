@@ -8,7 +8,8 @@
 > агент с вызовом инструментов (Schemathesis, Microcks), прогон и оценка готового набора
 > pytest (runner, мутационное тестирование, метрики), отчёты и журнал. **Генератора
 > pytest-тестов и самокоррекции пока нет**: агент исследует API инструментами, но своих
-> тестов не пишет. Подробно по каждому пункту ПМИ — [docs/pmi-report.md](docs/pmi-report.md).
+> тестов не пишет. Подробно по каждому пункту ПМИ — [docs/pmi-report.md](docs/pmi-report.md),
+> известные дефекты компонентов — [docs/known-issues.md](docs/known-issues.md).
 
 ## Из чего состоит
 
@@ -116,7 +117,18 @@ uv run --locked arqa-testgen generate http://localhost:18081/openapi.yaml \
 | Типы testing_tools | `uv run --locked mypy --config-file backend/testing_tools/pyproject.toml backend/testing_tools/src backend/testing_tools/tests` |
 | Lint агента | `uv run --locked ruff check backend/agent` |
 
-Ключ модели, Docker и интернет для этих наборов не нужны: LLM заменяется локальным
+Всё то же на чистом Linux и против настоящего Docker-стенда (testing_tools, Microcks,
+демо-сервисы в контейнерах) — одной командой:
+
+```bash
+docker compose -f docker-compose.yml -f tests/docker/compose.yml --profile test run --rm tests
+```
+
+Образ тестов ставит workspace строго из `uv.lock`; кроме наборов выше запускаются
+стендовые тесты `tests/acceptance/test_stand_docker.py`. Для тестов с настоящей
+моделью перед командой задайте `ARQA_LLM_TESTS=1` и `DEEPCODE_*`.
+
+Ключ модели, Docker и интернет для локальных наборов не нужны: LLM заменяется локальным
 сценарным сервером, сервисы поднимаются в процессе теста. Часть приёмочных тестов
 требует настоящую модель или Microcks и без них пропускается — см.
 [tests/acceptance/README.md](tests/acceptance/README.md).
@@ -133,6 +145,8 @@ backend/testing_tools/    HTTP-сервис инструментов
 demo/                     демо-сервисы с известными дефектами
 tests/acceptance/         приёмочные тесты по ПМИ
 docs/pmi-report.md        отчёт о готовности по ПМИ
+docs/known-issues.md      известные дефекты компонентов
+tests/docker/             прогон всех тестов в Docker на стенде
 docker-compose.yml        стенд: testing_tools, Microcks, демо-сервисы
 pyproject.toml, uv.lock   общий workspace и зафиксированные зависимости
 ```

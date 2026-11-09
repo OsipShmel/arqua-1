@@ -95,7 +95,9 @@ ARQA_LLM_TESTS=1 uv run pytest tests/acceptance -m llm   # с настоящей
 - [x] 2. Тесты А-1…А-12.
 - [x] 3. Тесты А-13…А-25.
 - [x] 4. Прогон офлайн, разбор результатов, уточнение матрицы.
-- [ ] 5. (ждёт согласования) Прогоны с настоящей LLM (ключ от пользователя), Ollama и Microcks (Docker) — по
+- [x] 5. Прогоны с настоящей LLM (ключ от пользователя), Ollama и Microcks (Docker) — по
       согласованию.
 - [x] 6. Отчёт `docs/pmi-report.md`.
 - [x] 7. README: корневой + `backend/*/README.md`.
+- [x] 8. Docker: `tests/docker/`, стендовые тесты, полный прогон в контейнере.
+- [x] 9. `docs/known-issues.md` — описание дефектов для команды.
