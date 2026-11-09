@@ -2,7 +2,8 @@ from agent.events import redact
 
 
 def test_real_key_is_masked(monkeypatch):
-    key = "sk-0123456789abcdef0123"
+    # Long enough to be masked, but not shaped like a provider key (A-19 scans for "sk-…").
+    key = "test-key-0123456789abcdef"
     monkeypatch.setenv("DEEPCODE_API_KEY", key)
 
     assert redact({"note": f"auth {key} failed"}) == {"note": "auth *** failed"}
