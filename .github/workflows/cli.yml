@@ -30,16 +30,16 @@ jobs:
         run: uv sync --locked --all-packages --all-extras --python ${{ matrix.python }}
       - name: Test CLI and parser
         run: uv run --no-project python -m pytest backend/agent/tests backend/openapi-parser/tests -q
+      # testing_tools runs in Docker (Linux); natively it does not support Windows.
       - name: Test testing_tools
-        run: uv run --no-project python -m pytest backend/testing_tools/tests -q
-        env:
-          PYTHONUTF8: '1'
+        if: runner.os != 'Windows'
+        run: uv run --no-project python -m pytest backend/testing_tools/tests -q --tb=short
       - name: Type-check testing_tools
+        if: runner.os != 'Windows'
         run: uv run --no-project mypy --config-file backend/testing_tools/pyproject.toml backend/testing_tools/src backend/testing_tools/tests
       - name: ПМИ acceptance suite
-        run: uv run --no-project python -m pytest tests/acceptance -q
-        env:
-          PYTHONUTF8: '1'
+        if: runner.os != 'Windows'
+        run: uv run --no-project python -m pytest tests/acceptance -q --tb=short
       - name: Verify classroom demo on macOS
         if: runner.os == 'macOS'
         run: uv run --no-project python backend/agent/examples/demo_cli.py --output runs/ci-demo

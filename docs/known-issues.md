@@ -26,6 +26,7 @@
 | [BUG-11](#bug-11) | testing_tools | низкая | один дефект — много находок, «Найдено проблем» завышено |
 | [BUG-12](#bug-12) | demo | низкая | результаты на Orders зависят от состояния сервиса, DEMO.md расходится с прогоном |
 | [INF-01](#inf-01) | agent | средняя | у агента/CLI нет Dockerfile и сервиса в compose |
+| [INF-02](#inf-02) | testing_tools | низкая | нативно на Windows не работает снятие процессов по таймауту |
 
 Исправлено в ветке `feat/pmi-acceptance` (в списке нет): разные версии Python в
 workspace, корневой `pyproject.toml` без пакетов, CI без тестов testing_tools.
@@ -254,3 +255,13 @@ Microcks на Orders находит то 0/4 (как в DEMO.md), то 1/4: на
 
 Обход для тестов: `tests/docker/` — образ с workspace из `uv.lock` для прогона наборов и
 стендовых тестов в сети compose.
+
+## INF-02
+
+**testing_tools нативно на Windows не снимает процессы по таймауту.** Компонент:
+testing_tools.
+
+`app/tools/process.py` (`_kill`) использует `os.killpg` и `signal.SIGKILL`, которых на
+Windows нет: при таймауте Schemathesis или pytest-набора падает `AttributeError`, процесс
+остаётся жить. Чинить не планируем — сервис запускается в Docker (Linux). В CI тесты
+testing_tools и приёмка на Windows не запускаются.

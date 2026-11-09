@@ -135,8 +135,9 @@ docker compose -f docker-compose.yml -f tests/docker/compose.yml --profile test 
 требует настоящую модель или Microcks и без них пропускается — см.
 [tests/acceptance/README.md](tests/acceptance/README.md).
 
-CI ([.github/workflows/cli.yml](.github/workflows/cli.yml)) гоняет все наборы на Linux,
-Windows и macOS с Python 3.13 и 3.14 и собирает Docker-образ testing_tools.
+CI ([.github/workflows/cli.yml](.github/workflows/cli.yml)) на Linux, Windows и macOS с
+Python 3.13 и 3.14 гоняет CLI и parser; testing_tools и приёмку — на Linux и macOS
+(на Windows testing_tools работает только в Docker); собирает Docker-образ testing_tools.
 
 ## Структура
 
