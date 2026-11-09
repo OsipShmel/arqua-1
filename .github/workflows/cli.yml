@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python: ['3.13', '3.14']
     env:
       LANGSMITH_TRACING: 'false'
@@ -30,10 +30,13 @@ jobs:
         run: uv sync --locked --all-packages --all-extras --python ${{ matrix.python }}
       - name: Test CLI and parser
         run: uv run --no-project python -m pytest backend/agent/tests backend/openapi-parser/tests -q
+      - name: Verify classroom demo on macOS
+        if: runner.os == 'macOS'
+        run: uv run --no-project python backend/agent/examples/demo_cli.py --output runs/ci-demo
       - name: Lint CLI
-        run: uv run --no-project ruff check backend/agent/src backend/agent/tests
+        run: uv run --no-project ruff check backend/agent/src backend/agent/tests backend/agent/examples
       - name: Check formatting
-        run: uv run --no-project ruff format --check backend/agent/src backend/agent/tests
+        run: uv run --no-project ruff format --check backend/agent/src backend/agent/tests backend/agent/examples
 
   tools-image:
     name: Tools Docker build
