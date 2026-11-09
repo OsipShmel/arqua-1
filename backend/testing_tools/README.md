@@ -54,6 +54,10 @@ Swagger — `http://127.0.0.1:8000/docs`.
 
 ## Инструменты
 
+Поддерживаются `schemathesis`, `microcks` и `mutation`. EvoMaster, который предлагает CLI
+агента, в этой версии сервиса не реализован: запрос с `tool: evomaster` получит
+`422 validation_error`.
+
 - **Schemathesis** ставится как зависимость пакета и запускается подпроцессом
   (`python -m schemathesis.cli run`). Ничего настраивать не нужно.
 - **Microcks** — отдельный сервер. Для локального запуска хватит uber-образа без авторизации:
@@ -95,9 +99,18 @@ API — `http://localhost:8000/api/v1`. Внутри compose-сети цели �
 
 ## Проверки
 
+Из `backend/testing_tools`:
+
 ```bash
 uv run pytest
 uv run mypy src tests
+```
+
+Из корня репозитория указывайте каталог `tests` явно — иначе pytest соберёт и
+`examples/sample_agent_tests`, которым нужен живой сервис:
+
+```bash
+uv run python -m pytest backend/testing_tools/tests
 ```
 
 Тесты раннеров (`tests/test_tool_*.py`) по-настоящему запускают Schemathesis и pytest
