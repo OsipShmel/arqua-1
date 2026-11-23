@@ -11,6 +11,7 @@ from importlib.metadata import version
 from pathlib import Path
 from uuid import uuid4
 
+from agent.console import show_input, show_operations, show_result
 from agent.contracts import http_url, read_contract
 from agent.events import Journal, atomic_json, mask_key, redact
 from agent.manifest import environment_manifest
@@ -133,6 +134,11 @@ def parser() -> argparse.ArgumentParser:
         default=120,
         help="Срок прогона tools, секунд (120)",
     )
+    generate.add_argument(
+        "--generate-tests",
+        action="store_true",
+        help="Сохранить pytest-кейсы по контракту, требуется --tools-url",
+    )
     return app
 
 
@@ -208,12 +214,16 @@ def write_reports(directory: Path, report: dict) -> None:
     tool_lines = tool_run_lines(report.get("execution") or {})
     if tool_lines:
         text += "\n## Прогоны инструментов\n\n" + "\n".join(tool_lines) + "\n"
-    if report.get("metrics") is not None:
+    tool_metrics = (report["metrics"] or {}).get("tool_runs")
+    if tool_metrics is not None:
         text += (
             "\n## Метрики инструментов\n\n```json\n"
-            + json.dumps(report["metrics"], ensure_ascii=False, indent=2)
+            + json.dumps({"tool_runs": tool_metrics}, ensure_ascii=False, indent=2)
             + "\n```\n"
         )
+    generated = (report.get("metrics") or {}).get("generated_pytest")
+    if generated is not None:
+        text += f"\n- Подготовлено pytest-кейсов: {generated['test_suite_size']}\n"
     if report.get("generated_tests"):
         text += (
             "\n## Полученные pytest-файлы\n\n"
@@ -300,6 +310,10 @@ def execute(args: argparse.Namespace) -> int:
         report["environment"] = environment_manifest()
         if args.tools and not args.tools_url:
             raise ValueError("Для --tools необходимо указать --tools-url")
+        if args.generate_tests and not args.tools_url:
+            raise ValueError("Для --generate-tests необходимо указать --tools-url")
+        if args.format == "text":
+            show_input(args, sys.stderr)
         print("Читаю OpenAPI-контракт...", file=sys.stderr)
         context = read_contract(args.contract, timeout=args.contract_timeout)
         report["contract"] = context.metadata()
@@ -310,6 +324,8 @@ def execute(args: argparse.Namespace) -> int:
             f"Контракт: {context.contract.title}, OpenAPI {context.contract.openapi_version}; операций: {len(context.contract.operations)}",
             file=sys.stderr,
         )
+        if args.format == "text":
+            show_operations(summary, sys.stderr)
         journal.emit(
             "context.prepared",
             operations=len(summary["operations"]),
@@ -348,6 +364,10 @@ def execute(args: argparse.Namespace) -> int:
                 "tools": list(dict.fromkeys(args.tools or ["schemathesis"])),
                 "timeout": args.tools_timeout,
             }
+            if args.generate_tests:
+                agent_context["gateway"]["pytest_metadata"] = {
+                    "contract_version": context.contract.api_version,
+                }
         print(
             "Вызываю агент (tools API)..."
             if args.tools_url
@@ -440,13 +460,9 @@ def execute(args: argparse.Namespace) -> int:
     if args.format == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
     else:
+        show_result(report, sys.stdout)
         if report["agent"] is not None:
-            print(output_text(report["agent"].get("output")))
-        print(
-            f"Режим tools: {report['tool_mode']}. Успешный вызов агента не означает прохождение тестов."
-        )
-        for kind, path in report["artifacts"].items():
-            print(f"Отчёт ({kind}): {path}")
+            print("\nОтвет агента\n" + output_text(report["agent"].get("output")))
     return code
 
 

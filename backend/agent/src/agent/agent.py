@@ -90,10 +90,24 @@ def run_qa_agent(
         if gateway
         else SYSTEM_PROMPT
     )
+    prompt_version = PROMPT_VERSION
+    generation = getattr(gateway, "pytest_generation", None)
+    if generation is not None:
+        generation.metadata["model"] = settings["model"]
+        prompt_version += "-pytest"
+        system_prompt += (
+            " Пользователь запросил файлы pytest. Сначала вызови run_api_checks, "
+            "затем обязательно вызови save_pytest_cases с полным набором контрактных "
+            "кейсов. Для значимых операций добавь штатные, граничные и ошибочные случаи, "
+            "когда контракт их описывает. Для связанного создания и чтения добавь сценарий. "
+            "Статусы ожидай из контракта, даже когда tools обнаружили другой ответ. "
+            "Если save_pytest_cases вернул ошибку, исправь указанные данные и повтори вызов. "
+            "Не заявляй, что сохранённые тесты уже были запущены."
+        )
     telemetry.configure(
         model=public_settings,
         prompt={
-            "version": PROMPT_VERSION,
+            "version": prompt_version,
             "sha256": hashlib.sha256(system_prompt.encode()).hexdigest(),
         },
     )

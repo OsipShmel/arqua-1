@@ -13,6 +13,7 @@ from langchain_core.tools import tool
 
 from agent.contracts import http_url
 from agent.events import Journal, atomic_json
+from agent.pytest_generation import PytestGeneration
 from agent.results import safe_relative_path
 
 TERMINAL = {"completed", "failed", "cancelled", "timed_out"}
@@ -62,6 +63,11 @@ class ToolsGateway:
         self.artifacts: list[dict] = []
         self.skipped_artifacts: list[dict] = []
         self.tool_errors: list[dict] = []
+        self.pytest_generation = (
+            PytestGeneration(self.contract, options["pytest_metadata"], journal)
+            if "pytest_metadata" in options
+            else None
+        )
 
     def run(self, name: str, max_examples: int = 50, max_time_s: int = 60) -> str:
         if name not in self.allowed or name not in SUPPORTED_TOOLS:
@@ -297,7 +303,10 @@ class ToolsGateway:
                 )
                 return f"Ошибка инструмента {tool_name}: {message}"
 
-        return [run_api_checks]
+        tools = [run_api_checks]
+        if self.pytest_generation is not None:
+            tools.append(self.pytest_generation.as_tool())
+        return tools
 
     def outcome(self) -> dict:
         states = [t.get("state") for r in self.runs for t in r.get("tools", [])]
@@ -313,7 +322,7 @@ class ToolsGateway:
             if states and all(s == "passed" for s in states)
             else "unknown"
         )
-        return {
+        outcome = {
             "tool_mode": "external",
             "tool_runs": self.runs,
             "tool_artifacts": self.artifacts,
@@ -345,3 +354,12 @@ class ToolsGateway:
                 "skipped_artifacts": self.skipped_artifacts,
             },
         }
+        if self.pytest_generation is not None:
+            generation = self.pytest_generation
+            if outcome["metrics"] is None:
+                outcome["metrics"] = {}
+            outcome["metrics"]["generated_pytest"] = {
+                "test_suite_size": generation.count
+            }
+            outcome["files"] = [file.model_dump() for file in generation.files]
+        return outcome
