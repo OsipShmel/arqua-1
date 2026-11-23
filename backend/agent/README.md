@@ -121,6 +121,7 @@ uv run --locked arqa-testgen generate openapi.yaml --base-url http://localhost:8
 | `--tools-url` | Базовый URL tools API с `/api/v1`; клиент работает в агенте |
 | `--tools` | Разрешённые schemathesis/microcks/evomaster; без списка при gateway — schemathesis |
 | `--tools-timeout` | Срок удалённого прогона, по умолчанию 120 секунд |
+| `--generate-tests` | Сохранить контрактные pytest-кейсы, требуется `--tools-url` |
 | `--help`, `--version` | Справка и версия, работают без ключей модели |
 
 CLI использует командный parser для базовой проверки и метаданных, затем отдельный
@@ -172,7 +173,7 @@ runs/<UTC-time>-<ID>/
 | `tool_mode` | `demo`, `external`, `real` или `unknown`; старый ответ без режима даёт `unknown` |
 | `agent` | Результат агента или `null`, если результат не получен |
 | `metrics` | Метрики от агента/tools либо `null`, если данных нет |
-| `generated_tests` | Пути действительно сохранённых pytest-файлов из `files`; текущий агент сам их не генерирует |
+| `generated_tests` | Пути к сохранённым pytest-файлам из `files` |
 | `source` | Хеши отобранных Python-файлов, пропуски и ограничение контекста |
 | `execution` | Результат проверок отдельно от успешности вызова агента |
 | `tool_runs`, `tool_artifacts` | Результаты и локальные файлы прогонов tools-сервиса |
@@ -248,16 +249,15 @@ workspace с `uv.lock`. LLM-ключи в CI не нужны.
 
 ## Ограничения
 
-- Генератора pytest и самокоррекции нет: агент вызывает инструменты и пишет отчёт, но
-  своих тестов не создаёт. `generated_tests` заполнится, когда генератор начнёт
-  возвращать `files` по [AgentResult v1](docs/agent-result.schema.json).
+- `--generate-tests` создаёт API-тесты на HTTP-коды и обязательные поля JSON.
+  Кейсы проверяются по OpenAPI и сохраняются в `agent_artifacts/test_contract.py`.
+  Подстановка `id` из предыдущего ответа поддерживает сценарии создания и чтения.
+  Для запуска задайте `ARQA_BASE_URL` и передайте файл в pytest.
+  [Живой пример с отдельным прогоном и метриками](../../docs/pmi-live-petstore.md).
+- Автоматического запуска и правки упавших тестов после генерации пока нет.
 - `--tools evomaster` проходит проверку CLI, но testing_tools в этой ветке EvoMaster не
   знает и отвечает 422 (сервер EvoMaster остался в `WiP/testing-tools`).
-- Ошибка внутри инструмента (неразрешённый tool, неверные аргументы, 4xx от
-  testing_tools) обрывает весь прогон агента: модели она не возвращается.
 - Агент не может отправить в testing_tools набор тестов на прогон (`tool=mutation`).
-- На недоступную LLM сообщение — текст SDK, например `Connection error.`; тип ошибки
-  (`OpenAIConnectionError`) виден в `report.json`.
 - Связи операций в summary берутся только из явных OpenAPI `links`.
 - Parser выполняет базовую проверку, а не полную валидацию OpenAPI; внешние `$ref` и
   `$anchor` не поддерживаются.
